@@ -1,0 +1,210 @@
+#use R to create a vector of characters of all the directories that are needed
+library(tidyverse)
+library(magrittr)
+library(lubridate)
+library(googlesheets4)
+#Read the google sheet for data
+.user<-"jordan.moss@imbrsea.eu"
+.key<-"1L7ONMSzzqqp1AVClNUKS8QD7fUQtxkkqn0d_C147ko4"
+.data_sheet<-"SL Project"
+.data_range<-"A:AA"
+
+
+#building datasheet
+gs4_auth(email=.user)
+(Raw_data<-range_read(ss = .key,
+                      sheet= .data_sheet,
+                      range = .data_range)%>%
+    filter(!is.na(.))%>%
+    mutate(Line_no=row_number()+1))
+#update the headers of the data set
+Names_short<-c("Folder","Market","Date","ID_by","ID_notes","Genus","Species","Gender","Maturity",
+               "DW","DL","TL","FL","PCL","ICL","OCL","Act_wt","Est_wt","DNA_no","Num_spec","AMPM",
+               "Catch_location","Additional_info","Entered_by","In_freezer","Freezer_location",
+               "Pickled","Line_no")
+names(Raw_data)<-Names_short
+Names_full<-c("Folder number","Market (three letter)","Date","ID by","ID notes","Genus",
+              "Species","Gender","Maturity","Disc width (cm)","Disc length (cm)", "Total length (cm)",
+              "Fork length (cm)","Pre-caudal length(cm)","Inner clasper length (cm)",
+              "Outer clasper length (cm)","Actual weight (kg)","Estimated weight (kg)",
+              "DNA sample number", "Number of specimesn","AM/PM","Catch Location", 
+              "Additional information","Data Entered by","In freezer","Freezer location",
+              "Pickled","Line Number")
+names(Names_full)<-Names_short  
+names_metrics<-c("DW","DL","TL","FL","PCL","ICL","OCL","Act_wt","Est_wt")
+remove(Names_short,Names_full,names_metrics)
+
+
+###########
+### LFQ analysis #####
+#############
+
+
+Survey_days_per_Market<-Raw_data%>%
+  filter(AMPM%in% c("AM","PM","ISD"))%>%
+  select(Date,Market)%>%
+  distinct()%>%
+  group_by(Market)%>%
+  summarise(Days_surveyed=n())%>%
+  ungroup()
+
+Neotrygons_per_Market<-Raw_data%>%
+  filter(AMPM%in% c("AM","PM","ISD"))%>%
+  filter(Genus=="Neotrygon")%>%
+  group_by(Market)%>%
+  summarise(Neotrygons_recorded=sum(Num_spec))%>%
+  ungroup()%>%
+  left_join(Survey_days_per_Market)%>%
+  filter(Days_surveyed>=median(Days_surveyed,na.rm = T))%>%
+  mutate(Specimens_per_day=Neotrygons_recorded/Days_surveyed)%>%
+  arrange(desc(Specimens_per_day))
+
+Samples<-min(Neotrygons_per_Market$Days_surveyed)
+
+MarKs = c('PAP', 'JFN', 'JPP','CFM', 'VFH', 'VFM', 'JMA', 'KFH', 'NBO')
+## TOP 9 MARKETS 
+
+
+Sampled_data<-tibble()
+
+for(i in seq(1,nrow(Neotrygons_per_Market)))
+{
+  Survey_dates<-Raw_data%>%
+    filter(AMPM %in%c("AM","PM","ISD"))%>%
+    filter(Market==Neotrygons_per_Market$Market[i])%>%
+    select(Date)%>%
+    distinct()%>%
+    sample_n(Samples)
+  Data_from_market<-Raw_data%>%
+    filter(AMPM %in%c("AM","PM","ISD"))%>%
+    filter(Maturity!="E")%>%
+    filter(Genus=="Neotrygon")%>%
+    filter(Market==Neotrygons_per_Market$Market[i])%>%
+    right_join(Survey_dates)%>%
+    filter(!is.na(Num_spec))
+  Sampled_data%<>%bind_rows(Data_from_market)  
+}
+
+ggplot(Sampled_data)+geom_histogram(aes(x=DW), bins = 25)+facet_wrap(vars(year(Date)))
+
+## Top 9
+
+MarKs = c('PAP', 'JFN', 'JPP','CFM', 'VFH', 'VFM', 'JMA', 'KFH', 'NBO')
+
+#N_per_markey_nine <- subset(Neotrygons_per_Market, Market == sort(MarKs))
+N_per_markey_nine = Neotrygons_per_Market[Neotrygons_per_Market$Market %in% MarKs, ]  
+
+
+Sampled_dataNine <- tibble()
+
+for(i in seq(1,nrow(N_per_markey_nine)))
+{
+  Survey_dates<-Raw_data%>%
+    filter(AMPM %in%c("AM","PM","ISD"))%>%
+    filter(Market==MarKs[i])%>%
+    select(Date)%>%
+    distinct()%>%
+    sample_n(Samples)
+  Data_from_market<-Raw_data%>%
+    filter(AMPM %in%c("AM","PM","ISD"))%>%
+    filter(Maturity!="E")%>%
+    filter(Genus=="Neotrygon")%>%
+    filter(Market==MarKs[i])%>%
+    right_join(Survey_dates)%>%
+    filter(!is.na(Num_spec))
+  Sampled_dataNine%<>%bind_rows(Data_from_market)  
+}
+
+ggplot(Sampled_dataNine)+geom_histogram(aes(x=DW), bins = 40)+facet_wrap(vars(year(Date)))
+
+##### PAP ####
+par(mfrow=c(3,3))
+
+Raw_PAP = Raw_data[Raw_data$Market == 'PAP', ]
+Raw_PAP = Raw_PAP[Raw_PAP$Genus == 'Neotrygon', ]
+
+completeFun <- function(data, desiredCols) {
+  completeVec <- complete.cases(data[, desiredCols])
+  return(data[completeVec, ])
+}
+
+Raw_PAP = completeFun(Raw_PAP, "DW")
+Raw_PAP <- Raw_PAP[ which(  Raw_PAP$DW > 17), ]
+hist(Raw_PAP$DW)
+#### JPP #### 
+Raw_JPP = Raw_data[Raw_data$Market == 'JPP', ]
+Raw_JPP = Raw_JPP[Raw_JPP$Genus == 'Neotrygon', ]
+
+Raw_JPP = completeFun(Raw_JPP, "DW")
+Raw_JPP <- Raw_JPP[ which(  Raw_JPP$DW > 17), ]
+
+hist(Raw_JPP$DW)
+
+###### JFN ######
+Raw_JFN = Raw_data[Raw_data$Market == 'JFN', ]
+Raw_JFN = Raw_JFN[Raw_JFN$Genus == 'Neotrygon', ]
+
+Raw_JFN = completeFun(Raw_JFN, "DW")
+Raw_JFN <- Raw_JFN[ which(  Raw_JFN$DW > 17), ]
+
+hist(Raw_JFN$DW)
+ 
+#####CFM #####
+Raw_CFM = Raw_data[Raw_data$Market == 'CFM', ]
+Raw_CFM = Raw_CFM[Raw_CFM$Genus == 'Neotrygon', ]
+
+Raw_CFM = completeFun(Raw_CFM, "DW")
+Raw_CFM <- Raw_CFM[ which(  Raw_CFM$DW > 17), ]
+
+hist(Raw_CFM$DW)
+
+#####KFH  ######
+Raw_KFH = Raw_data[Raw_data$Market == 'KFH', ]
+Raw_KFH = Raw_KFH[Raw_KFH$Genus == 'Neotrygon', ]
+
+Raw_KFH = completeFun(Raw_KFH, "DW")
+Raw_KFH <- Raw_KFH[ which(  Raw_KFH$DW > 17), ]
+
+hist(Raw_KFH$DW)
+
+#####JMA   #######
+Raw_JMA = Raw_data[Raw_data$Market == 'JMA', ]
+Raw_JMA = Raw_JMA[Raw_JMA$Genus == 'Neotrygon', ]
+
+Raw_JMA = completeFun(Raw_JMA, "DW")
+Raw_JMA <- Raw_JMA[ which(  Raw_JMA$DW > 17), ]
+
+hist(Raw_JMA$DW)
+
+###### NBO   ######
+Raw_NBO = Raw_data[Raw_data$Market == 'NBO', ]
+Raw_NBO = Raw_NBO[Raw_NBO$Genus == 'Neotrygon', ]
+
+Raw_NBO = completeFun(Raw_NBO, "DW")
+Raw_NBO <- Raw_NBO[ which(  Raw_NBO$DW > 17), ]
+
+hist(Raw_NBO$DW, breaks = 15)
+
+ ###### VFM  ######
+Raw_VFM = Raw_data[Raw_data$Market == 'VFM', ]
+Raw_VFM = Raw_VFM[Raw_VFM$Genus == 'Neotrygon', ]
+
+Raw_VFM = completeFun(Raw_VFM, "DW")
+Raw_VFM <- Raw_VFM[ which(  Raw_VFM$DW > 17), ]
+
+hist(Raw_VFM$DW)
+
+###### VFH #######
+Raw_VFH = Raw_data[Raw_data$Market == 'VFH', ]
+Raw_VFH = Raw_VFH[Raw_VFH$Genus == 'Neotrygon', ]
+
+Raw_VFH = completeFun(Raw_VFH, "DW")
+Raw_VFH <- Raw_VFH[ which(  Raw_VFH$DW > 17), ]
+
+hist(Raw_VFH$DW)
+
+###########
+
+mysample <- mydata[sample(1:nrow(mydata), 50,
+                          replace=FALSE),]
+
