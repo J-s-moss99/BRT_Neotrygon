@@ -1,0 +1,341 @@
+###LBSPR ~~SIMULATIONS 
+Linf_obs <- 42
+k_obs <- 0.23
+L0_obs <- 19
+sigma_obs <- 0.25
+max_age <- 14
+max_size <- 47
+max_size_se <- max_size/10 # 10% error assumption to start
+
+### Selectivity simulations 
+## Make sure to change set seed each time
+### 2018
+bimodal_sel_results_2018 <- bimodal_selectivity(M = .3, Age = 0:max_age, mean_sel1 = 2, sd_sel1 = 0.5, 
+                                                mean_sel2 = 6, sd_sel2 = 1.5,
+                                               n = 355, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+bimodal_sel_LAA_2018 <- bimodal_sel_results_2018[[1]]
+####2019
+## Make sure to change set seed each time
+
+bimodal_sel_results_2019 <- bimodal_selectivity(M = .3, Age = 0:max_age, mean_sel1 = 2, sd_sel1 = 0.5, 
+                                                mean_sel2 = 6, sd_sel2 = 1.5,
+                                                n = 454, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+bimodal_sel_LAA_2019 <- bimodal_sel_results_2019[[1]]
+####2020
+## Make sure to change set seed each time
+
+bimodal_sel_results_2020 <- bimodal_selectivity(M = .3, Age = 0:max_age, mean_sel1 = 2, sd_sel1 = 0.5, 
+                                                mean_sel2 = 6, sd_sel2 = 1.5,
+                                                n = 724, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+bimodal_sel_LAA_2020 <- bimodal_sel_results_2020[[1]]
+ 
+sq <- seq(max(length(bimodal_sel_LAA_2018$Lt),length(bimodal_sel_LAA_2019$Lt),
+              length(bimodal_sel_LAA_2020$Lt)))
+
+
+bimodal_LAA =  data.frame(bimodal_sel_LAA_2018$Lt[sq], 
+                            bimodal_sel_LAA_2019$Lt[sq], bimodal_sel_LAA_2020$Lt[sq])
+
+
+
+head(bimodal_LAA)
+names(bimodal_LAA)[1]<-paste("2018")
+names(bimodal_LAA)[2]<-paste("2019")
+names(bimodal_LAA)[3]<-paste("2020")
+head(bimodal_LAA)
+hist(bimodal_LAA[,1], breaks = 19, xlab='cm',main=1)
+hist(bimodal_LAA[,2], breaks = 19, xlab='cm',main=2)
+hist(bimodal_LAA[,3], breaks = 19, xlab='cm',main=3)
+
+############### dome ###########
+#### remember seed!!! 
+
+
+dome_sel_results_2018  <- dome_selectivity(M = .3, Age = 0:max_age, sd_sel = 2,
+                                         mean_sel = 5, n = 355, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+dome_sel_LAA_2018  <-    dome_sel_results_2018 [[1]]
+
+
+dome_sel_results_2019  <- dome_selectivity(M = .3, Age = 0:max_age, sd_sel = 2,
+                                           mean_sel = 5, n = 454, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+dome_sel_LAA_2019  <-    dome_sel_results_2019 [[1]]
+
+
+dome_sel_results_2020  <- dome_selectivity(M = .3, Age = 0:max_age, sd_sel = 2,
+                                           mean_sel = 5, n = 724, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+dome_sel_LAA_2020  <-    dome_sel_results_2020 [[1]]
+
+
+
+sq <- seq(max(length(dome_sel_LAA_2018$Lt),length(dome_sel_LAA_2019$Lt),
+              length(dome_sel_LAA_2020$Lt)))
+
+
+dome_LAA =  data.frame(dome_sel_LAA_2018$Lt[sq], 
+                          dome_sel_LAA_2019$Lt[sq], dome_sel_LAA_2020$Lt[sq])
+
+head(dome_LAA)
+names(dome_LAA)[1]<-paste("2018")
+names(dome_LAA)[2]<-paste("2019")
+names(dome_LAA)[3]<-paste("2020")
+head(dome_LAA)
+hist(dome_LAA[,1], breaks = 19, xlab='cm',main=1)
+hist(dome_LAA[,2], breaks = 19, xlab='cm',main=1)
+hist(dome_LAA[,3], breaks = 19, xlab='cm',main=1)
+ ##############
+#####
+###########
+##########
+#########
+#### sandbox#########
+########
+########
+#########
+########
+myBootstrap <- boot(bimodal_sel_LAA_150, bimodal_selectivity (M = .3, Age = 0:max_age, mean_sel1 = 2, sd_sel1 = 0.5, 
+                                          mean_sel2 = 6, sd_sel2 = 1.5, n = 724, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs), R=1000 )
+
+for (i in 1:3) {
+  
+  squared <- bimodal_selectivity (M = .3, Age = 0:max_age, mean_sel1 = 2, sd_sel1 = 0.5, 
+                                  mean_sel2 = 6, sd_sel2 = 1.5, n = 5, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs) 
+  squared = squared[[1]]
+  print(squared)
+}
+
+#################
+young_sel_results_2018  <- young_selectivity(M = .2, Age = 0:max_age, mean_sel = 4, slope_sel = 0.6,
+                                          n = 355, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+young_sel_LAA_2018  <- young_sel_results_2018 [[1]] 
+
+
+young_sel_results_2019  <- young_selectivity(M = .2, Age = 0:max_age, mean_sel = 4, slope_sel = 0.6,
+                                             n = 454, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+young_sel_LAA_2019  <- young_sel_results_2019 [[1]]
+
+young_sel_results_2020  <- young_selectivity(M = .2, Age = 0:max_age, mean_sel = 4, slope_sel = 0.6,
+                                             n = 724, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+young_sel_LAA_2020  <- young_sel_results_2020 [[1]]
+
+
+sq <- seq(max(length(young_sel_LAA_2018$Lt),length(young_sel_LAA_2019$Lt),
+              length(young_sel_LAA_2020$Lt)))
+
+
+young_LAA =  data.frame(young_sel_LAA_2018$Lt[sq], 
+                       young_sel_LAA_2019$Lt[sq], young_sel_LAA_2020$Lt[sq])
+
+head(young_LAA)
+names(young_LAA)[1]<-paste("2018")
+names(young_LAA)[2]<-paste("2019")
+names(young_LAA)[3]<-paste("2020")
+head(young_LAA)
+hist(young_LAA[,1], breaks = 22, xlab='cm',main=1)
+hist(young_LAA[,2], breaks = 22, xlab='cm',main=2)
+hist(young_LAA[,3], breaks = 22, xlab='cm',main=3)
+
+
+#############
+old_sel_results_2018  <- old_selectivity(M = .2, Age = 0:max_age, slope_sel = 0.6,
+                                      mean_sel = 4, n = 355, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+old_sel_LAA_2018 <- old_sel_results_2018 [[1]]
+
+old_sel_results_2019  <- old_selectivity(M = .2, Age = 0:max_age, slope_sel = 0.6,
+                                         mean_sel = 4, n = 454, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+old_sel_LAA_2019 <- old_sel_results_2019 [[1]]
+
+old_sel_results_2020  <- old_selectivity(M = .2, Age = 0:max_age, slope_sel = 0.6,
+                                         mean_sel = 4, n = 724, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+old_sel_LAA_2020 <- old_sel_results_2020 [[1]]
+
+
+sq <- seq(max(length(old_sel_LAA_2018$Lt),length(old_sel_LAA_2019$Lt),
+              length(old_sel_LAA_2020$Lt)))
+
+
+old_LAA =  data.frame(old_sel_LAA_2018$Lt[sq], 
+                        old_sel_LAA_2019$Lt[sq], old_sel_LAA_2020$Lt[sq])
+
+head(old_LAA)
+names(old_LAA)[1]<-paste("2018")
+names(old_LAA)[2]<-paste("2019")
+names(old_LAA)[3]<-paste("2020")
+head(old_LAA)
+
+##############
+#########
+###############
+real = read.csv("Report_Final Res/LRaw_MultiYrHead2020.csv")
+realFem = read.csv("Report_Final Res/Lraw_Females.csv")
+
+#real18 = real$X2018[1:355]
+
+par(mfrow=c(1,3))
+#par(mar=c(1,1,1,1))
+
+##True data
+hist(real[,1], breaks = 19, xlab='cm',main='True_18')
+hist(real[,2], breaks = 19, xlab='cm',main='True_19')
+hist(real[,3], breaks = 19, xlab='cm',main='True_20')
+##True female
+hist(realFem[,1], breaks = 19, xlab='cm',main='True_18')
+hist(realFem[,2], breaks = 19, xlab='cm',main='True_19')
+hist(realFem[,3], breaks = 19, xlab='cm',main='True_20')
+hist(realFem[,4], breaks = 19, xlab='cm',main='True_20')
+
+### old 
+hist(old_LAA[,1], breaks = 19, xlab='cm',main='Old')
+hist(old_LAA[,2], breaks = 19, xlab='cm',main='old')
+hist(old_LAA[,3], breaks = 19, xlab='cm',main='Old')
+## young
+hist(young_LAA[,1], breaks = 19, xlab='cm',main='young')
+hist(young_LAA[,2], breaks = 19, xlab='cm',main='young')
+hist(young_LAA[,3], breaks = 19, xlab='cm',main='young')
+## dome
+hist(dome_LAA[,1], breaks = 19, xlab='cm',main='dome')
+hist(dome_LAA[,2], breaks = 19, xlab='cm',main='dome')
+hist(dome_LAA[,3], breaks = 19, xlab='cm',main='dome')
+## Bimodal
+hist(bimodal_LAA[,1], breaks = 19, xlab='cm',main='bimodal')
+hist(bimodal_LAA[,2], breaks = 19, xlab='cm',main='bimodal')
+hist(bimodal_LAA[,3], breaks = 19, xlab='cm',main='bimodal')
+
+
+# #hist(real18, breaks = 20, xlab='cm',main=1)
+# hist(bimodal_sel_LAA_2018$Lt, breaks = 19, xlab='cm',main=1)
+# hist(dome_sel_LAA_2018$Lt, breaks = 19, xlab='cm',main=2)
+# hist(real18, breaks = 19, xlab='cm',main=3)
+# hist(young_sel_LAA_2018$Lt, breaks = 19, xlab='cm',main=4)
+# hist(old_sel_LAA_2018$Lt,breaks = 19, xlab='cm',main=5)
+# Old_LAA = as.data.frame(old_sel_LAA_2018$Lt)
+# Young_LAA = as.data.frame(young_sel_LAA_2018$Lt)
+# dome_LAA = as.data.frame(dome_sel_LAA_2018$Lt)
+# bimodal_LAA = as.data.frame(bimodal_sel_LAA_2018$Lt)
+# #true_LAA = as.data.frame(real18)
+
+write.csv(old_LAA,"Old_LAA.csv", row.names = FALSE)
+write.csv(young_LAA,"Young_LAA.csv", row.names = FALSE)
+write.csv(dome_LAA,"dome_LAA.csv", row.names = FALSE)
+write.csv(bimodal_LAA,"bimodal_LAA.csv", row.names = FALSE)
+write.csv(true_LAA,"true_LAA.csv", row.names = FALSE)
+#############
+######## Model run comps #######
+#############
+library(LBSPR)
+Neo_Pars <- new("LB_pars")
+#slotNames(Neo_Pars)
+#class?LB_pars
+# Populate parameters 
+Neo_Pars@MK <- 0.2/0.23 ## Go back an try m=0.3
+Neo_Pars@Linf <- Linf_obs
+Neo_Pars@CVLinf <- 0.1
+Neo_Pars@L50 <- 35
+Neo_Pars@L95 <- 38
+Neo_Pars@Walpha <- 0.02865 ## Pakistan study averaged for male an female
+Neo_Pars@Wbeta <- 3.0255   ## Pakistan study averaged for male an female
+Neo_Pars@FecB = 0.8
+Neo_Pars@BinWidth <- 2
+Neo_Pars@BinMax <- 49
+Neo_Pars@BinMin <- 2
+Neo_Pars@L_units <- "cm"
+
+Neo_Pars@Species <- "Neotrygon indica"
+
+Len_bimodal <- new("LB_lengths", LB_pars=Neo_Pars, file="bimodal_LAA.csv", 
+            dataType="raw", header=T)
+#####
+##
+#####
+Len_dome <- new("LB_lengths", LB_pars=Neo_Pars, file="dome_LAA.csv", 
+                   dataType="raw", header=T)
+
+#####
+##
+#####
+Len_old <- new("LB_lengths", LB_pars=Neo_Pars, file="Old_LAA.csv", 
+                dataType="raw", header=T)
+
+#####
+##
+#####
+Len_young <- new("LB_lengths", LB_pars=Neo_Pars, file="Young_LAA.csv", 
+                dataType="raw", header=T)
+
+#####
+##
+#####
+Len_real <- new("LB_lengths", LB_pars=Neo_Pars, file="true_LAA.csv", 
+                     dataType="raw", header=T)
+
+#####
+##
+#####
+#Len_realF <- new("LB_lengths", LB_pars=Neo_Pars, file="Report_Final Res/LRaw_MultiYrHead2020 - Copy.csv", 
+ #              dataType="raw", header=T)
+par(mfrow = c(3, 5))
+bi = plotSize(Len_bimodal)
+dom = plotSize(Len_dome)
+old=plotSize(Len_old)
+young=plotSize(Len_young)
+real=plotSize(Len_real)
+
+#library(gridExtra)
+grid.arrange(bi, dom,old,young,real,  nrow = 3, ncol=2)
+
+#plotSize(Len_real)
+#plotSize(Len_realF)
+
+
+myFitreal <- LBSPRfit(Neo_Pars, Len_real)
+myFityoung <- LBSPRfit(Neo_Pars, Len_young)
+myFitold <- LBSPRfit(Neo_Pars, Len_old)
+myFitdome <- LBSPRfit(Neo_Pars, Len_dome)
+myFitbimodal <- LBSPRfit(Neo_Pars, Len_bimodal)
+myFitrealF <- LBSPRfit(Neo_Pars, Len_realF)
+
+
+realsize = plotSize(myFitreal)
+younsize =plotSize(myFityoung)
+oldsize= plotSize(myFitold)
+domsize = plotSize(myFitdome)
+bisize = plotSize(myFitbimodal)
+
+grid.arrange(bisize, domsize,oldsize,younsize,realsize,  nrow = 3, ncol=2)
+
+######
+##
+######
+plotMat(myFitreal)
+#plotMat(myFitrealF)
+plotMat(myFityoung)
+plotMat(myFitold)
+plotMat(myFitdome)
+plotMat(myFitbimodal)
+######
+##
+######
+plotEsts(myFitreal)
+#plotEsts(myFitrealF)
+plotEsts(myFityoung)
+plotEsts(myFitold)### SPR does not consider impact of Mega-Spawners 
+plotEsts(myFitdome)
+plotEsts(myFitbimodal)
+#plotSim(myFitrealF) 
+myFitreal@Ests
+myFitbimodal@Ests
+myFitdome@Ests
+
+
+plotEsts(myFitdome)
