@@ -1,0 +1,615 @@
+##########
+# author: Jordan Singh Moss
+##########
+## identifying life-history parameters of the whipray using landing data
+
+# load packages for plotting and date-time operations
+library(lattice)
+library(lubridate)
+
+# load data (keep variable names simple, makes working in R easy)
+
+Neotrygon <-  read.csv("Neo_matMurity.csv")
+Neotrygon <-  read.csv("Maturity_2.csv")
+Neotrygon <- read.csv("Maturity_New.csv")
+head(Neotrygon)
+names(Neotrygon)[1]<-paste("gender")
+
+#################
+#### 1. Maturity ####
+#################
+
+#make dataset copy with other name, so you can double check at any point the data is correct
+Neo_mat <- Neotrygon
+
+plot(Neo_mat$maturity)
+summary(Neo_mat$gender)
+
+# keep records that have been assigned a maturity stage
+# N	Immature
+# S	Sub adult
+# Y	Mature
+# P	Pregnant
+############# E	Unborn pup (Not included - maybe we can do something with this at a later date)
+
+#Neo_mat <- subset(Neo_mat, Maturity %in% c("N","P","S","Y"))
+#Neo_mat <- subset(Neo_mat, Gender %in% c("M","F"))
+
+# define binary variable: mature = 1; immature = 0
+Neo_mat$mature <- 1
+Neo_mat$mature[Neo_mat$Maturity %in% c("N","S")] <- 0 
+# some data exploration
+xyplot(maturity~dw|gender,data=Neo_mat)
+
+
+# fit models to data
+# binomial data with a logisitic regression model
+
+mod.maturity.L   <- glm(maturity ~ dw, family=binomial(link="logit"),data=Neo_mat)
+mod.maturity.S   <- glm(maturity ~ dw + as.character(gender), family=binomial(link="logit"),data=Neo_mat)
+mod.maturity.SL  <- glm(maturity ~ dw * as.character(gender), family=binomial(link="logit"),data=Neo_mat)
+
+summary(mod.maturity.L)
+summary(mod.maturity.S)
+summary(mod.maturity.SL)
+
+### Model comparison
+
+# compare models based on AIC
+AIC(mod.maturity.L);AIC(mod.maturity.S);AIC(mod.maturity.SL) # second model (with length and Gender has lowest AIC)
+
+# compred.Spare predictions with observed values, in table
+
+Neo_mat$pred.L <- as.numeric(predict(mod.maturity.L,newdata =Neo_mat,type="response",se.fit = T)$fit >0.5)
+table(Neo_mat$pred.L,Neo_mat$maturity,Neo_mat$gender)
+
+Neo_mat$pred.S <- as.numeric(predict(mod.maturity.S,newdata = Neo_mat,type="response",se.fit = T)$fit >0.5)
+table(Neo_mat$pred.S,Neo_mat$maturity,Neo_mat$gender)
+
+xyplot(maturity~dw|gender,data=Neo_mat)
+xyplot(pred.S~dw|gender,data=Neo_mat)
+
+Neo_mat$pred.SL <- as.numeric(predict(mod.maturity.SL,newdata = Neo_mat,type="response",se.fit = T)$fit >0.5)
+table(Neo_mat$pred.SL,Neo_mat$maturity,Neo_mat$gender)
+
+
+# or create a ROC curve to compare the area under the curve
+#install.packages("pROC")
+library(pROC)
+
+roccurve.L  <- roc(Neo_mat$maturity ~ Neo_mat$pred.L)
+roccurve.S  <- roc(Neo_mat$maturity ~ Neo_mat$pred.S)
+roccurve.SL <- roc(Neo_mat$maturity ~ Neo_mat$pred.SL)
+
+auc(roccurve.L)
+auc(roccurve.S)    # largest area with fewest parameters
+auc(roccurve.SL)
+
+plot(roccurve.L)
+plot(roccurve.S,add=T,col="red")
+plot(roccurve.SL,add=T,col="blue")
+
+###### plot Pr(maturity) over length
+
+res.pred <- predict(mod.maturity.S,
+                    newdata = data.frame(dw=rep(seq(0,50,0.1),2),
+                                         gender=c(rep("M",length(seq(0,50,0.1))),rep("F",length(seq(0,50,0.1))))),
+                    type="response",se.fit = T)
+
+# plot and add lines
+par(mfrow=c(2,1))
+# males
+plot(seq(0,50,0.1),res.pred$fit[1:length(seq(0,50,0.1))],type="l",xlab="length (cm)",ylab="Pr(Mature)",main="males")
+polygon(c(seq(0,50,0.1),rev(seq(0,50,0.1))), 
+        c(res.pred$fit[1:length(seq(0,50,0.1))] + 1.96*res.pred$se.fit[1:length(seq(0,50,0.1))] , 
+          rev(res.pred$fit[1:length(seq(0,50,0.1))] - 1.96 *res.pred$se.fit[1:length(seq(0,50,0.1))])), 
+        col="grey60")
+lines(seq(0,50,0.1),res.pred$fit[1:length(seq(0,50,0.1))],type="l")
+# length at 50% maturity
+M50m <- which(abs(res.pred$fit[1:length(seq(0,50,0.1))]-0.5) == min(abs(res.pred$fit[1:length(seq(0,50,0.1))]-0.5)))/10
+M95m <- which(abs(res.pred$fit[1:length(seq(0,50,0.1))]-0.95) == min(abs(res.pred$fit[1:length(seq(0,50,0.1))]-0.95)))/10
+
+abline(v=M50m,col="red",lty="dotted")
+abline(v=M95m,col="red",lty="dotted")
+
+text(M50m-20,0.9,
+     paste0("M 50% = ",M50m),col="red",cex=1)
+text(M50m-20,0.6,
+     paste0("M 95% = ",M95m),col="red",cex=1)
+
+# females
+plot(seq(0,50,0.1),res.pred$fit[(length(seq(0,50,0.1))+1):length(res.pred$fit)],type="l",xlab="length (cm)",ylab="Pr(Mature)",main="females")
+polygon(c(seq(0,50,0.1),rev(seq(0,50,0.1))),
+        c(res.pred$fit[(length(seq(0,50,0.1))+1):length(res.pred$fit)] + 1.96*res.pred$se.fit[(length(seq(0,50,0.1))+1):length(res.pred$fit)] , 
+          rev(res.pred$fit[(length(seq(0,50,0.1))+1):length(res.pred$fit)] - 1.96 *res.pred$se.fit[(length(seq(0,50,0.1))+1):length(res.pred$fit)])),
+        col="grey60")
+lines(seq(0,50,0.1),res.pred$fit[(length(seq(0,50,0.1))+1):length(res.pred$fit)],type="l")
+M50 <- which(abs(res.pred$fit[(length(seq(0,50,0.1))+1):length(res.pred$fit)]-0.5) == min(abs(res.pred$fit[(length(seq(0,50,0.1))+1):length(res.pred$fit)]-0.5)))/10
+M95 <- which(abs(res.pred$fit[(length(seq(0,50,0.1))+1):length(res.pred$fit)]-0.95) == min(abs(res.pred$fit[(length(seq(0,50,0.1))+1):length(res.pred$fit)]-0.95)))/10
+abline(v=M95,col="red",lty="dotted")
+abline(v=M50,col="red",lty="dotted")
+text(M50-20,0.9,
+     paste0("M 50% = ",M50),col="red",cex=1)
+text(M50-20,0.6,
+     paste0("M 95% = ",M95),col="red",cex=1)
+
+
+
+
+##### Males only #####
+
+Neo_mat <- Neotrygon
+
+Neo_matM <- Neo_mat[which(Neo_mat$gender=="M" & Neo_mat$dw >18),]
+plot(Neo_matM$maturity)
+summary(Neo_matM$gender)
+
+# keep records that have been assigned a maturity stage
+# N	Immature
+# S	Sub adult
+# Y	Mature
+# P	Pregnant
+############# E	Unborn pup (Not included - maybe we can do something with this at a later date)
+
+#Neo_matM <- subset(Neo_matM, Maturity %in% c("N","P","S","Y"))
+#Neo_matM <- subset(Neo_matM, Gender %in% c("M","F"))
+
+# define binary variable: mature = 1; immature = 0
+Neo_matM$maturity[Neo_matM$maturity %in% c("N","S")] <- 0 
+Neo_matM$maturity[Neo_matM$maturity %in% c("Y")] <- 1
+Neo_matM$maturity = as.numeric(Neo_matM$maturity)
+
+# some data exploration
+xyplot(maturity~dw|gender,data=Neo_matM)
+
+
+# fit models to data
+# binomial data with a logisitic regression model
+
+mod.maturity.L   <- glm(maturity ~ dw, family=binomial(link="logit"),data=Neo_matM)
+mod.maturity.S   <- glm(maturity ~ dw + as.character(gender), family=binomial(link="logit"),data=Neo_matM)
+#mod.maturity.SL  <- glm(maturity ~ dw * as.character(gender), family=binomial(link="logit"),data=Neo_matM)
+summary(mod.maturity.L)$r.squared
+
+summary(mod.maturity.L)
+#summary(mod.maturity.S)
+#summary(mod.maturity.SL)
+
+### Model comparison
+
+# compare models based on AIC
+#
+# compred.Spare predictions with observed values, in table
+
+Neo_matM$pred.L <- as.numeric(predict(mod.maturity.L,newdata =Neo_matM,type="response",se.fit = T)$fit >0.5)
+table(Neo_matM$pred.L,Neo_matM$maturity,Neo_matM$gender)
+
+xyplot(maturity~dw|gender,data=Neo_matM)
+xyplot(pred.L~dw|gender,data=Neo_matM)
+#
+# or create a ROC curve to compare the area under the curve
+#install.packages("pROC")
+library(pROC)
+
+roccurve.L  <- roc(Neo_matM$maturity ~ Neo_matM$pred.L)
+#
+auc(roccurve.L)
+#
+
+plot(roccurve.L)
+#
+###### plot Pr(maturity) over length
+
+res.pred <- predict(mod.maturity.L,
+                    newdata = data.frame(dw=rep(seq(0,50,0.1),2),
+                                         gender=c(rep("M",length(seq(0,50,0.1))),rep("F",length(seq(0,50,0.1))))),
+                    type="response",se.fit = T)
+
+# plot and add lines
+# males
+plot(seq(0,50,0.1),res.pred$fit[1:length(seq(0,50,0.1))],type="l",xlab="length (cm)",ylab="Pr(Mature)",main="males")
+polygon(c(seq(0,50,0.1),rev(seq(0,50,0.1))), 
+        c(res.pred$fit[1:length(seq(0,50,0.1))] + 1.96*res.pred$se.fit[1:length(seq(0,50,0.1))] , 
+          rev(res.pred$fit[1:length(seq(0,50,0.1))] - 1.96 *res.pred$se.fit[1:length(seq(0,50,0.1))])), 
+        col="grey60")
+lines(seq(0,50,0.1),res.pred$fit[1:length(seq(0,50,0.1))],type="l")
+# length at 50% maturity
+M50m <- which(abs(res.pred$fit[1:length(seq(0,50,0.1))]-0.5) == min(abs(res.pred$fit[1:length(seq(0,50,0.1))]-0.5)))/10
+M95m <- which(abs(res.pred$fit[1:length(seq(0,50,0.1))]-0.95) == min(abs(res.pred$fit[1:length(seq(0,50,0.1))]-0.95)))/10
+
+abline(v=M50m,col="red",lty="dotted")
+abline(v=M95m,col="red",lty="dotted")
+
+text(M50m-20,0.9,
+     paste0("M 50% = ",M50m),col="red",cex=1)
+text(M50m-20,0.6,
+     paste0("M 95% = ",M95m),col="red",cex=1)
+
+
+##method 2
+
+library(sizeMat)
+
+Neo_matM = read.csv("maturity_trial_2.csv")
+
+head(Neo_matM)
+names(Neo_matM)[1]<-paste("gender")
+Neo_matM <- Neo_matM[which(Neo_matM$dw >17),]
+
+my_ogive_fq = gonad_mature(Neo_matM, varNames = c("dw", "Maturity"), inmName = c("N","S"),
+                           matName = c("Y"), method = "fq", niter = 5000)
+
+print(my_ogive_fq)
+my_ogive_bayes = gonad_mature(Neo_matM, varNames = c("dw", "Maturity"), inmName = c("N","S"),
+                              matName = c("Y"), method = "bayes", niter = 5000)
+
+print(my_ogive_bayes)
+
+par(mfrow = c(2,2))
+plot(my_ogive_fq, xlab = "Total length (cm.)", ylab = "Proportion mature", col = c("blue", "red"))
+
+
+plot(my_ogive_fq, xlab = "Total length (cm.)", ylab = "Proportion mature", col = c("blue", "red"), onlyOgive = TRUE)
+
+plot(my_ogive_bayes, xlab = "Total length (cm.)", ylab = "Proportion mature", col = c("blue", "red"), onlyOgive = TRUE)
+
+
+###### Spatial test ###########
+library(dplyr)
+
+Neo_matM = read.csv("Maturity_location.csv")
+
+head(Neo_matM)
+names(Neo_matM)[1]<-paste("Market")
+#Neo_matM <- Neo_matM[which(Neo_matM$dw >17),]
+summary(Neo_matM$Market)
+
+agg <- count(Neo_matM, Coast, maturity)
+agg
+
+#Neo_matM = read.csv("mat_no_south.csv")
+
+# define binary variable: mature = 1; immature = 0
+Neo_matM$maturity[Neo_matM$maturity %in% c("N","S")] <- 0 
+Neo_matM$maturity[Neo_matM$maturity %in% c("Y")] <- 1
+Neo_matM$maturity = as.numeric(Neo_matM$maturity)
+
+# some data exploration
+xyplot(maturity~dw|gender,data=Neo_matM)
+
+
+# fit models to data
+# binomial data with a logisitic regression model
+
+mod.maturity.L   <- glm(maturity ~ dw, family=binomial(link="logit"),data=Neo_matM)
+mod.maturity.S   <- glm(maturity ~ dw + as.character(Coast), family=binomial(link="logit"),data=Neo_matM)
+#mod.maturity.SL  <- glm(maturity ~ dw * as.character(gender), family=binomial(link="logit"),data=Neo_matM)
+
+summary(mod.maturity.L)
+summary(mod.maturity.S)
+#summary(mod.maturity.SL)
+
+### Model comparison
+### Model comparison
+
+# compare models based on AIC
+AIC(mod.maturity.L);AIC(mod.maturity.S) # second model (with length and Gender has lowest AIC)
+
+# compred.Spare predictions with observed values, in table
+
+Neo_matM$pred.L <- as.numeric(predict(mod.maturity.L,newdata =Neo_matM,type="response",se.fit = T)$fit >0.5)
+table(Neo_matM$pred.L,Neo_matM$maturity,Neo_matM$gender)
+
+Neo_matM$pred.S <- as.numeric(predict(mod.maturity.S,newdata = Neo_matM,type="response",se.fit = T)$fit >0.5)
+table(Neo_matM$pred.S,Neo_matM$maturity,Neo_matM$gender)
+
+xyplot(maturity~dw|gender,data=Neo_matM)
+xyplot(pred.S~dw|gender,data=Neo_matM)
+xyplot(pred.L~dw|gender,data=Neo_matM)
+
+
+
+# or create a ROC curve to compare the area under the curve
+#install.packages("pROC")
+library(pROC)
+
+roccurve.L  <- roc(Neo_matM$maturity ~ Neo_matM$pred.L)
+roccurve.S  <- roc(Neo_matM$maturity ~ Neo_matM$pred.S)
+
+auc(roccurve.L)
+auc(roccurve.S)    # largest area with fewest parameters
+
+plot(roccurve.L)
+plot(roccurve.S,add=T,col="red")
+
+###### plot Pr(maturity) over length
+
+res.pred <- predict(mod.maturity.S,
+                    newdata = data.frame(dw=rep(seq(0,50,0.1),2),
+                                         gender=c(rep("M",length(seq(0,50,0.1))),rep("F",length(seq(0,50,0.1))))),
+                    type="response",se.fit = T)
+
+# plot and add lines
+# males
+plot(seq(0,50,0.1),res.pred$fit[1:length(seq(0,50,0.1))],type="l",xlab="length (cm)",ylab="Pr(Mature)",main="males")
+polygon(c(seq(0,50,0.1),rev(seq(0,50,0.1))), 
+        c(res.pred$fit[1:length(seq(0,50,0.1))] + 1.96*res.pred$se.fit[1:length(seq(0,50,0.1))] , 
+          rev(res.pred$fit[1:length(seq(0,50,0.1))] - 1.96 *res.pred$se.fit[1:length(seq(0,50,0.1))])), 
+        col="grey60")
+lines(seq(0,50,0.1),res.pred$fit[1:length(seq(0,50,0.1))],type="l")
+# length at 50% maturity
+M50m <- which(abs(res.pred$fit[1:length(seq(0,50,0.1))]-0.5) == min(abs(res.pred$fit[1:length(seq(0,50,0.1))]-0.5)))/10
+M95m <- which(abs(res.pred$fit[1:length(seq(0,50,0.1))]-0.95) == min(abs(res.pred$fit[1:length(seq(0,50,0.1))]-0.95)))/10
+
+abline(v=M50m,col="red",lty="dotted")
+abline(v=M95m,col="red",lty="dotted")
+
+text(M50m-20,0.9,
+     paste0("M 50% = ",M50m),col="red",cex=1)
+text(M50m-20,0.6,
+     paste0("M 95% = ",M95m),col="red",cex=1)
+
+##### East Vs West #######
+ Neo_matWest <- subset(Neo_matM, Coast =="West")
+ Neo_matEast <- subset(Neo_matM, Coast =="East")
+ Neo_matNorth <- subset(Neo_matM, Coast =="North")
+
+my_ogive_fq = gonad_mature(Neo_matM, varNames = c("dw", "maturity"), inmName = c("N","S"),
+                                +                            matName = c("Y"), method = "fq", niter = 10000)
+
+print(my_ogive_fq)
+# formula: Y = 1/1+exp-(A + B*X) 
+# 
+# Original Bootstrap (Median)
+# A   -8.5176  -8.54             
+# B   0.2943   0.2951            
+# L50 28.9453  28.9589           
+# R2  0.4304   -                 
+
+my_ogive_bayes = gonad_mature(Neo_matM, varNames = c("dw", "maturity"), inmName = c("N","S"),
+                                   +                               matName = c("Y"), method = "bayes", niter = 10000)
+
+  #### North
+  my_ogive_fqN = gonad_mature(Neo_matNorth, varNames = c("dw", "maturity"), inmName = c("N","S"),
+                                 +                            matName = c("Y"), method = "fq", niter = 10000)
+print(my_ogive_fqN)
+#formula: Y = 1/1+exp-(A + B*X) 
+# Original Bootstrap (Median)
+# A   -14.7271 -15.1126          
+# B   0.5895   0.6048            
+# L50 24.9841  24.9934           
+# R2  0.5131   -                 
+
+my_ogive_bayesN = gonad_mature(Neo_matNorth, varNames = c("dw", "maturity"), inmName = c("N","S"),
+                                    +                               matName = c("Y"), method = "bayes", niter = 10000)
+print(my_ogive_bayesN)
+# formula: Y = 1/1+exp-(A + B*X) 
+# 
+# Bootstrap (Median)
+# A             -15.4286
+# B               0.6183
+# L50            25.0152
+# R2              0.5131
+
+ #### East 
+ my_ogive_fqNE = gonad_mature(Neo_matEast, varNames = c("dw", "maturity"), inmName = c("N","S"),
+                                  +                             matName = c("Y"), method = "fq", niter = 10000)
+ print(my_ogive_fqNE)
+# formula: Y = 1/1+exp-(A + B*X) 
+# 
+# Original Bootstrap (Median)
+# A   -20.1822 -20.2488          
+# B   0.6382   0.6401            
+# L50 31.6249  31.627            
+# R2  0.5811   -                 
+ my_ogive_bayesE = gonad_mature(Neo_matEast, varNames = c("dw", "maturity"), inmName = c("N","S"),
+                                    +                                matName = c("Y"), method = "bayes", niter = 10000)
+ print(my_ogive_bayesE)
+# formula: Y = 1/1+exp-(A + B*X) 
+# 
+# Bootstrap (Median)
+# A             -20.2510
+# B               0.6402
+# L50            31.6284
+# R2              0.5811
+
+ #### West
+my_ogive_fqW = gonad_mature(Neo_matWest, varNames = c("dw", "maturity"), 
+                              inmName = c("N","S"),matName = c("Y"), method = "bayes", niter = 10000)
+print(my_ogive_fqW)
+# formula: Y = 1/1+exp-(A + B*X) 
+# 
+# Original Bootstrap (Median)
+# A   -14.3344 -14.694           
+# B   0.5766   0.5905            
+# L50 24.8613  24.8462           
+# R2  0.7017   -                 
+my_ogive_bayesW = gonad_mature(Neo_matWest, varNames = c("dw", "maturity"), inmName = c("N","S"),
+                                                                  matName = c("Y"), method = "bayes", niter = 10000)
+print(my_ogive_bayesW)
+#formula: Y = 1/1+exp-(A + B*X) 
+
+#Bootstrap (Median)
+#A             -14.7200
+#B               0.5928
+#L50            24.8496
+#R2              0.7017
+
+
+par(mfrow = c(2,2))
+plot(my_ogive_fq, main = "All Coastlines" ,xlab = "Total length (cm.)", ylab = "Proportion mature", col = c("blue", "red"),
+       onlyOgive = TRUE)
+#Size at gonad maturity = 29 
+#Confidence intervals = 28.3 - 29.5 
+#Rsquare = 0.43> 
+    plot(my_ogive_fqN, main = "North Coast" , xlab = "Total length (cm.)", ylab = "Proportion mature", col = c("blue", "red"),
+         onlyOgive = TRUE)
+#Size at gonad maturity = 25 
+#Confidence intervals = 23.8 - 26 
+#Rsquare = 0.51> 
+   plot(my_ogive_fqNE, main = "East Coast" ,  xlab = "Total length (cm.)", ylab = "Proportion mature", col = c("blue", "red"),
+                       onlyOgive = TRUE)
+#Size at gonad maturity = 31.6 
+#Confidence intervals = 31.3 - 32 
+
+#Rsquare = 0.58> 
+   plot(my_ogive_fqW, main = "West Coast" ,  xlab = "Total length (cm.)", ylab = "Proportion mature", col = c("blue", "red"),
+                        onlyOgive = TRUE)
+
+
+
+plot(my_ogive_fq, xlab = "Total length (cm.)", ylab = "Proportion mature", col = c("blue", "red"))
+
+
+plot(my_ogive_fq, xlab = "Total length (cm.)", ylab = "Proportion mature", col = c("blue", "red"),
+     onlyOgive = TRUE)
+
+
+plot(my_ogive_bayes, xlab = "Total length (cm.)", ylab = "Proportion mature", col = c("blue", "red"), 
+     onlyOgive = TRUE)
+
+
+
+####################### sandbox
+library(lessR)
+
+Neo_matEAstVWest <- subset(Neo_matM, Coast =="East" | Coast == "West")
+Neo_matEAstVWest <- Neo_matEAstVWest[c(5:6)]
+Neo_matEDist <- Neo_matEast[c(5:6)]
+Neo_matWdist <- Neo_matWest[c(5:6)]
+
+bartlett.test(dw ~ Coast, data=Neo_matEAstVWest)
+ t.test(dw ~ Coast, data=Neo_matEAstVWest,
+       var.equal=TRUE,
+       conf.level=0.95)
+ ibrary(lattice)
+ 
+ hist( dw | Coast,
+           data=Neo_matEAstVWest,
+           layout=c(1,2)      #  columns and rows of individual plots
+ )
+ 
+ ggplot(Neo_matEAstVWest, aes(dw, fill = Coast)) + geom_density(alpha = 0.2)
+ 
+ ggplot(Neo_matEAstVWest, aes(dw, fill = Coast))+ 
+    geom_histogram(alpha = 0.5)
+ 
+ boxplot(dw ~ Coast,
+         data = Neo_matEAstVWest,
+         names=c("East","West"),
+         ylab="Value")
+ 
+ 
+ # First distribution
+ hist(Neo_matEDist$dw, breaks=30, xlim=c(0,50), col=rgb(1,0,0,0.5), xlab="DW", 
+      ylab="Number", main="distribution of DW for **N. Indica**, East Vs West Coast" )
+ 
+ # Second with add=T to plot on top
+ hist(Neo_matWest$dw, breaks=30, xlim=c(0,50), col=rgb(0,0,1,0.5), add=T)
+ 
+ # Add legend
+ legend("topright", legend=c("East","West"), col=c(rgb(1,0,0,0.5), 
+                                                       rgb(0,0,1,0.5)), pt.cex=2, pch=15 )
+ 
+ par(
+    mfrow=c(1,2),
+    mar=c(4,4,1,0)
+ )
+ hist(Neo_matEDist$dw, breaks=30 , xlim=c(0,50) , col=rgb(1,0,0,0.5) , xlab="DW" , ylab="n" , main= "East" )
+ hist(Neo_matWest$dw, breaks=30 , xlim=c(0,50) , col=rgb(0,0,1,0.5) , xlab="DW" , ylab="" , main="West")
+ 
+############ PAP ############
+Neo_PAP = read.csv(file="Matutrity_PAP.csv")
+head(Neo_PAP) 
+ names(Neo_PAP)[1]<-paste("Market")
+#Neo_matM <- Neo_matM[which(Neo_matM$dw >17),]
+
+summary(Neo_PAP$Market)
+
+agg <- count(Neo_PAP, dw, maturity)
+agg
+my_ogive_fqPAP = gonad_mature(Neo_PAP, varNames = c("DW", "Maturity"), inmName = c("N","S"),
+                                     matName = c("Y"), method = "fq", niter = 10000)
+ 
+print(my_ogive_fqPAP)
+
+ # formula: Y = 1/1+exp-(A + B*X) 
+ # 
+ 
+my_ogive_bayesPAP = gonad_mature(Neo_PAP, varNames = c("DW", "Maturity"), inmName = c("N","S"),
+                                              matName = c("Y"), method = "bayes", niter = 10000)
+ 
+print(my_ogive_bayesPAP)
+
+ ######## age ############
+Neo_age = read.csv("N_indica_Age.csv")
+head(Neo_age) 
+
+my_ogive_fqAge = gonad_mature(Neo_age, varNames = c("dw", "maturity"), inmName = 0,
+                              matName = 1, method = "fq", niter = 10000)
+
+print(my_ogive_fqAge)
+print(my_ogive_fqPAP)
+
+plot(my_ogive_fqPAP, main = "Lading survey", xlab = "Total length (cm.)", ylab = "Proportion mature", col = c("blue", "red"),
+     onlyOgive = TRUE)
+
+plot(my_ogive_fqAge,main ="Aging study", xlab = "Total length (cm.)", ylab = "Proportion mature", col = c("blue", "red"),
+     onlyOgive = TRUE)
+
+par(mfrow=c(2,2))
+
+plot(my_ogive_fqPAP, main = "Lading survey", xlab = "Total length (cm.)", ylab = "Proportion mature", col = c("blue", "red"),
+     onlyOgive = F)
+
+plot(my_ogive_fqAge,main ="Aging study", xlab = "Total length (cm.)", ylab = "Proportion mature", col = c("blue", "red"),
+     onlyOgive = F)
+my_ogive_bayesAge = gonad_mature(Neo_age, varNames = c("dw", "maturity"), inmName = 0,
+                                 matName = 1, method = "bayes", niter = 10000)
+
+print(my_ogive_bayesAge)
+
+tt = read.csv("AgeVsurvey.csv")
+head(tt)
+names(tt)[1]<-paste("dw")
+
+
+bartlett.test(dw ~ Study, data=tt)
+t.test(dw ~ Study, data=tt,
+       var.equal=TRUE,
+       conf.level=0.95)
+ibrary(lattice)
+
+hist( dw | Coast,
+      data=Neo_matEAstVWest,
+      layout=c(1,2)      #  columns and rows of individual plots
+)
+
+ggplot(Neo_matEAstVWest, aes(dw, fill = Coast)) + geom_density(alpha = 0.2)
+
+ggplot(Neo_matEAstVWest, aes(dw, fill = Coast))+ 
+   geom_histogram(alpha = 0.5)
+
+boxplot(dw ~ Coast,
+        data = Neo_matEAstVWest,
+        names=c("East","West"),
+        ylab="Value")
+
+
+# First distribution
+hist(Neo_matEDist$dw, breaks=30, xlim=c(0,50), col=rgb(1,0,0,0.5), xlab="DW", 
+     ylab="Number", main="distribution of DW for **N. Indica**, East Vs West Coast" )
+
+# Second with add=T to plot on top
+hist(Neo_matWest$dw, breaks=30, xlim=c(0,50), col=rgb(0,0,1,0.5), add=T)
+
+# Add legend
+legend("topright", legend=c("East","West"), col=c(rgb(1,0,0,0.5), 
+                                                  rgb(0,0,1,0.5)), pt.cex=2, pch=15 )
+
+par(
+   mfrow=c(1,2),
+   mar=c(4,4,1,0)
+)
+hist(Neo_matEDist$dw, breaks=30 , xlim=c(0,50) , col=rgb(1,0,0,0.5) , xlab="DW" , ylab="n" , main= "East" )
+hist(Neo_matWest$dw, breaks=30 , xlim=c(0,50) , col=rgb(0,0,1,0.5) , xlab="DW" , ylab="" , main="West")
