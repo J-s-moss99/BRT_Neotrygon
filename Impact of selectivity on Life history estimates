@@ -1,0 +1,1116 @@
+library(tidyverse)
+library(truncnorm)
+library(AquaticLifeHistory)
+library(BayesGrowth)
+library(tidybayes)
+library(bayesplot)
+library(tmvtnorm)
+library(cowplot)
+library(pander)
+
+theme_set(theme_bw())
+
+#### Selectivity shapes funcs
+
+dome_selectivity <- function(Age, 
+                             mean_sel, 
+                             sd_sel, 
+                             M =.2, 
+                             n = 100,
+                             Linf, 
+                             k, 
+                             L0, 
+                             sigma=Linf/100) {
+  addTaskCallback(function(...) {set.seed(123);TRUE})
+  selectivity <- dnorm(Age,mean_sel,sd_sel)/max(dnorm(Age,mean_sel,sd_sel))
+  survival <- rep(NA, length(Age)) 
+  survival[1] <- 1
+  for (i in 2:(max(Age)+1)) {
+    survival[i] <- survival[i - 1] * exp(-M)
+  } 
+  
+  sims <- as.vector(rmultinom(1, prob = survival * selectivity, size = 10000))
+  
+  age_structure <- sims/max(sims)
+  
+  Observed_lengths <-  Linf-(Linf-L0)*(exp(-k*Age))
+  
+  
+  Sampled_lengths <- as.data.frame(cbind(Observed_lengths, sims))  
+  Selected_lengths <- rep(Sampled_lengths[, 1], Sampled_lengths[, 2])  
+  Age_col <- rep(Age, Sampled_lengths[, 2]) 
+  
+  
+  len_col <- sapply(Selected_lengths, function(x) rtruncnorm(1,a=-0.0001, mean = x, sd = x^sigma))
+  
+  
+  Results <- as.data.frame(cbind(Age_col, len_col))  
+  colnames(Results) <- c("Age", "Lt")  
+  Results <-Results[sample(nrow(Results), size = n, replace = T), ] 
+  
+  return(list(LAA = Results, survival=survival, selectivity=selectivity, `Relative sampled ages` = age_structure))
+}
+
+young_selectivity <- function(Age, 
+                              mean_sel, 
+                              slope_sel, 
+                              M =.2, 
+                              n = 100,
+                              Linf, 
+                              k, 
+                              L0, 
+                              sigma=Linf/100) {
+  
+  addTaskCallback(function(...) {set.seed(2020);TRUE})
+  
+  
+  selectivity <- 1/(1 + exp(abs(slope_sel) * (Age - mean_sel)))
+  survival <- rep(NA, length(Age)) 
+  survival[1] <- 1
+  for (i in 2:(max(Age)+1)) {
+    survival[i] <- survival[i - 1] * exp(-M)
+  } 
+  
+  sims <- as.vector(rmultinom(1, prob = survival * selectivity, size = 10000))
+  
+  age_structure <- sims/max(sims)
+  
+  
+  Observed_lengths <-  Linf-(Linf-L0)*(exp(-k*Age))
+  
+  
+  Sampled_lengths <- as.data.frame(cbind(Observed_lengths, sims))  
+  Selected_lengths <- rep(Sampled_lengths[, 1], Sampled_lengths[, 2])  
+  Age_col <- rep(0:max(Age), Sampled_lengths[, 2]) 
+  
+  
+  len_col <- sapply(Selected_lengths, function(x) rtruncnorm(1,a=-0.0001, mean = x, sd = x^sigma))
+  
+  
+  Results <- as.data.frame(cbind(Age_col, len_col))  
+  colnames(Results) <- c("Age", "Lt")  
+  Results <-Results[sample(nrow(Results), size = n, replace = F), ] 
+  
+  return(list(LAA = Results, survival=survival, selectivity=selectivity, `Relative sampled ages` = age_structure))
+}
+
+old_selectivity <- function(Age, 
+                            mean_sel, 
+                            slope_sel, 
+                            M =.2, 
+                            n = 100,
+                            Linf, 
+                            k, 
+                            L0, 
+                            sigma=Linf/100) {
+  addTaskCallback(function(...) {set.seed(769);TRUE})
+  
+  selectivity <- 1/(1 + exp(-abs(slope_sel) * (Age - mean_sel)))
+  survival <- rep(NA, length(Age))
+  survival[1] <- 1
+  for (i in 2:(max(Age)+1)) {
+    survival[i] <- survival[i - 1] * exp(-M)
+  } 
+  
+  sims <- as.vector(rmultinom(1, prob = survival * selectivity, size = 10000))
+  
+  age_structure <- (survival * selectivity)/max((survival * selectivity))
+  
+  Observed_lengths <-  Linf-(Linf-L0)*(exp(-k*Age))
+  
+  
+  Sampled_lengths <- as.data.frame(cbind(Observed_lengths, sims))  
+  Selected_lengths <- rep(Sampled_lengths[, 1], Sampled_lengths[, 2])  
+  Age_col <- rep(Age, Sampled_lengths[, 2]) 
+  
+  
+  len_col <- sapply(Selected_lengths, function(x) rtruncnorm(1,a=-0.0001, mean = x, sd = x^sigma))
+  
+  
+  Results <- as.data.frame(cbind(Age_col, len_col))  
+  colnames(Results) <- c("Age", "Lt")  
+  Results <-Results[sample(nrow(Results), size = n, replace = T), ] 
+  
+  return(list(LAA = Results, survival=survival, selectivity=selectivity, `Relative sampled ages` = age_structure))
+}
+
+max_size <- 49
+max_size_se <- max_size/10 # 10% error assumption to start
+birth_size <- 15
+birth_size_se <- birth_size/10 # 10% error assumption to start
+
+Neo_LAA = read.csv("Bayes_aging.csv", header = T)
+#Neo_LAA = read.csv("bay", header = T)
+head(Neo_LAA)
+names(Neo_LAA)[1]<-paste("Length")
+head(Neo_LAA)
+min(Neo_LAA$Length)
+# Use the function to estimate the rstan model
+fit <- Estimate_MCMC_Growth(data = Neo_LAA, 
+                            Model = "VB",
+                            iter =   100000,
+                            BurnIn = 40000,
+                            thin = 100,
+                            Linf = max_size,
+                            Linf.se = max_size_se,
+                            L0 = birth_size,
+                            sigma.max = 25,
+                            L0.se = birth_size_se,
+                            k.max = 0.5,
+                            n_cores = 10,
+                            control = list(adapt_delta = 0.99))
+fit
+#mcmc_combo(fit,pars = c("Linf", "k", "L0", "sigma")) 
+#mcmc_acf(fit,pars = c("Linf", "k", "L0", "sigma"))
+#save.image()
+# mean parameters from true data (Comp for all scenarios)
+Linf_obs <- 40.08
+k_obs <- 0.25
+L0_obs <- 18.89
+sigma_obs <- 0.25
+max_age <- 13
+#max_size <- 49
+#max_size_se <- max_size/10 # 10% error assumption to start
+
+###
+####Instead here you put your estimates from the bayes growth...?
+####
+real_curve <- data.frame(Age = 0:max_age, AVG = Calc_VBGF_LAA(Linf_obs, 
+                                                              k_obs,
+                                                              L0_obs,
+                                                              0:max_age))
+
+###### Missing young individuals#### 
+# gears are only catching older individuals 
+## mean selectivity estimated from mean length in catches over the 3 years...? seems reasonable 
+### Mean Length at PAP landing site 2017-21 = 32cm using LAA conversion that is roughly 4yrs old
+### mean_sel == sl50
+old_sel_results_50 <- old_selectivity(M = .2, Age = 0:max_age, slope_sel = 0.7,
+          mean_sel = 5, n = 50, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+old_sel_LAA_50 <- old_sel_results_50[[1]]
+
+old_sel_results_100 <- old_selectivity(M = .2, Age = 0:max_age, slope_sel = 0.7,
+            mean_sel = 5, n = 100, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+old_sel_LAA_100 <- old_sel_results_100[[1]]
+
+
+old_sel_results_150 <- old_selectivity(M = .2, Age = 0:max_age, slope_sel = 0.7,
+         mean_sel = 5, n = 150, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+
+old_sel_LAA_150 <- old_sel_results_150[[1]]
+
+
+old_sel_conditions <-  data.frame(Age = 0:max_age,
+            survival = old_sel_results_50[["survival"]] ,
+                                  selectivity=  old_sel_results_50[["selectivity"]],
+                                  `Relative sampled ages` = old_sel_results_50[["Relative sampled ages"]]) %>%
+  set_names(c("Age", "Survival", "Selectivity", "Relative Sampled Ages")) %>%
+  pivot_longer(-Age, names_to = "Type",values_to = "Values" )
+old_sel_conditions$Type <- factor(old_sel_conditions$Type,levels = c("Survival","Selectivity","Relative Sampled Ages"))
+
+old_sel_cond_plot <- ggplot(old_sel_conditions, aes(x = Age, y = Values, fill = Type, col = Type))+
+  ggtitle(" ")+
+  geom_area(size = 1, position = position_dodge(), alpha = .5)+
+  scale_fill_viridis_d(direction = -1)+
+  scale_colour_viridis_d(direction = -1)+
+  labs(y = "Proportion", x = "Age (years)")+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  theme_bw()+
+  theme(legend.position ="none")
+
+old_sel_cond_plot
+
+
+
+######## fit mods ############
+## 50 sims
+Bayes_results_old_50 <- Estimate_MCMC_Growth(data = old_sel_LAA_50,
+                                             Model = "VB",
+                                             Linf = max_size,
+                                             Linf.se = max_size_se,
+                                            # L0 = birth_size,
+                                             L0 = 18,
+                                             sigma.max = 50,
+                                            # L0.se = birth_size_se,
+                                            L0.se = 1.8,
+                                             k.max = 0.8,
+                                             thin = 100,
+                                             BurnIn = 40000,
+                                             n_cores = 10,
+                                             iter = 100000,
+                                             control = list(adapt_delta = 0.99))
+
+#mcmc_combo(Bayes_results_old_50,pars = c("Linf", "k", "L0", "sigma")) 
+#mcmc_acf(Bayes_results_old_50,pars = c("Linf", "k", "L0"))
+#mcmc_acf_bar(Bayes_results_old_50,pars = c("Linf", "k", "L0", "sigma"))
+## Positive autocorrelation is bad (it means the chain tends to stay in the same area between iterations) 
+## and you want it to drop quickly to zero with increasing lag.
+## Negative autocorrelation is possible and it is useful as it indicates fast convergence of sample mean
+## towards true mean.
+
+
+nls_results_old_50 <- Estimate_Growth(data = old_sel_LAA_50, models = "VB",n.bootstraps = 100000, plots = F,Max.Age = max_age)
+
+Bayes_curve_old_50 <- Calculate_MCMC_growth_curve(Bayes_results_old_50,Model = "VB", max.age = max(nls_results_old_50$Estimates$Age), probs = 0.95)
+save.image()
+
+old_sel_50_plot <- ggplot() +
+  geom_point( data = old_sel_LAA_50, aes(x = Age, y = Lt), alpha = 0.3)+
+  labs(y = "Length (cm)", x = "Age (years)")+
+  geom_ribbon(data = nls_results_old_50$Estimates, aes(x = Age, ymin = low, ymax = upp, fill = "Frequentist"),alpha = .5 )+
+  geom_line(data = nls_results_old_50$Estimates, aes(x = Age, y = AVG,col = "Frequentist"),alpha = .5, size = 1.2)+
+  geom_lineribbon(data = Bayes_curve_old_50, aes(x = Age, y = LAA, ymin = .lower, ymax = .upper,fill = "Bayesian",col = "Bayesian"),
+                  alpha = .5)+
+  geom_line(data = real_curve, aes(x = Age, y = AVG),col = "blue", linetype = "dashed", size = 1.2)+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  scale_fill_viridis_d(end = 0.5, name = "Model")+
+  scale_colour_viridis_d(end = 0.5, guide = FALSE)+
+  theme(legend.position ="none")
+
+pander(Get_MCMC_parameters(Bayes_results_old_50),caption = "MCMC - selectivity increases with age")
+
+## 100 sims
+Bayes_results_old_100 <- Estimate_MCMC_Growth(data = old_sel_LAA_100,
+                                              Model = "VB",
+                                              Linf = max_size,
+                                              Linf.se = max_size_se,
+                                              # L0 = birth_size,
+                                              L0 = 18,
+                                              sigma.max = 50,
+                                              # L0.se = birth_size_se,
+                                              L0.se = 1.8,
+                                              k.max = 0.8,
+                                              thin = 100,
+                                              BurnIn = 40000,
+                                              n_cores = 10,
+                                              iter = 100000,
+                                              control = list(adapt_delta = 0.99))
+
+nls_results_old_100 <- Estimate_Growth(data = old_sel_LAA_100, models = "VB",n.bootstraps = 100000, plots = F,Max.Age = max_age)
+
+
+Bayes_curve_old_100 <- Calculate_MCMC_growth_curve(Bayes_results_old_100,Model = "VB", max.age = max(nls_results_old_100$Estimates$Age), probs = 0.95)
+
+
+old_sel_100_plot <- ggplot() +
+  geom_point( data = old_sel_LAA_100, aes(x = Age, y = Lt), alpha = 0.3)+
+  labs(y = "Length (cm)", x = "Age (years)")+
+  geom_ribbon(data = nls_results_old_100$Estimates, aes(x = Age, ymin = low, ymax = upp, fill = "Frequentist"),alpha = .5 )+
+  geom_line(data = nls_results_old_100$Estimates, aes(x = Age, y = AVG,col = "Frequentist"),alpha = .5, size = 1.2)+
+  geom_lineribbon(data = Bayes_curve_old_100, aes(x = Age, y = LAA, ymin = .lower, ymax = .upper,fill = "Bayesian",col = "Bayesian"),
+                  alpha = .5)+
+  geom_line(data = real_curve, aes(x = Age, y = AVG),col = "blue", linetype = "dashed", size = 1.2)+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  scale_fill_viridis_d(end = 0.5, name = "Model")+
+  scale_colour_viridis_d(end = 0.5, guide = FALSE)+
+  theme(legend.position ="none")
+
+pander(Get_MCMC_parameters(Bayes_results_old_100),caption = "MCMC - selectivity increases with age")
+
+
+###n=150
+save.image()
+
+Bayes_results_old_150   <- Estimate_MCMC_Growth(data = old_sel_LAA_150,
+                                              Model = "VB",
+                                              Linf = max_size,
+                                              Linf.se = max_size_se,
+                                              # L0 = birth_size,
+                                              L0 = 18,
+                                              sigma.max = 50,
+                                              # L0.se = birth_size_se,
+                                              L0.se = 1.8,
+                                              k.max = 0.8,
+                                              thin = 100,
+                                              BurnIn = 40000,
+                                              n_cores = 10,
+                                              iter = 100000,
+                                              control = list(adapt_delta = 0.99))
+nls_results_old_150 <- Estimate_Growth(data = old_sel_LAA_150, models = "VB",n.bootstraps = 100000, plots = F,Max.Age = max_age)
+
+Bayes_curve_old_150 <- Calculate_MCMC_growth_curve(Bayes_results_old_150,Model = "VB", max.age = max(nls_results_old_150$Estimates$Age), probs = 0.95)
+
+
+old_sel_150_plot <- ggplot() +
+  geom_point( data = old_sel_LAA_150, aes(x = Age, y = Lt), alpha = 0.3)+
+  labs(y = "Length (cm)", x = "Age (years)")+
+  geom_ribbon(data = nls_results_old_150$Estimates, aes(x = Age, ymin = low, ymax = upp, fill = "Frequentist"),alpha = .5 )+
+  geom_line(data = nls_results_old_150$Estimates, aes(x = Age, y = AVG,col = "Frequentist"),alpha = .5, size = 1.2)+
+  geom_lineribbon(data = Bayes_curve_old_150, aes(x = Age, y = LAA, ymin = .lower, ymax = .upper,fill = "Bayesian",col = "Bayesian"),
+                  alpha = .5)+
+  geom_line(data = real_curve, aes(x = Age, y = AVG),col = "blue", linetype = "dashed", size = 1.2)+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  scale_fill_viridis_d(end = 0.5, name = "Model")+
+  scale_colour_viridis_d(end = 0.5, guide = FALSE)+
+  theme(legend.position ="none")
+
+pander(Get_MCMC_parameters(Bayes_results_old_150),caption = "MCMC - selectivity increases with age")
+
+save.image()
+# grouped plot
+Old_sel_plots <- plot_grid(old_sel_cond_plot,old_sel_50_plot, old_sel_100_plot,
+                           old_sel_150_plot, align = "h", nrow = 1,
+                           labels = c("Selectivity increases with age", "Sample size = 50", "Sample size = 100", "Sample size = 150"),
+                           label_size = 10,label_x = c(-.2,0,0,0))
+###########
+##### Dome Shaped Selectivity #########
+###########
+
+
+dome_sel_results_50 <- dome_selectivity(M = .2, Age = 0:max_age, sd_sel = 2,
+                                        mean_sel = 5, n = 50, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+dome_sel_LAA_50 <- dome_sel_results_50[[1]]
+
+
+dome_sel_results_100 <- dome_selectivity(M = .2, Age = 0:max_age, sd_sel = 2,
+                                         mean_sel = 5, n = 100, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+dome_sel_LAA_100 <- dome_sel_results_100[[1]]
+
+
+dome_sel_results_150 <- dome_selectivity(M = .2, Age = 0:max_age, sd_sel = 2,
+                                         mean_sel = 5, n = 150, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+dome_sel_LAA_150 <- dome_sel_results_150[[1]]
+
+
+
+dome_sel_conditions <-  data.frame(Age = 0:max_age,
+                                   survival = dome_sel_results_50[["survival"]] ,
+                                   selectivity=  dome_sel_results_50[["selectivity"]],
+                                   `Relative sampled ages` = dome_sel_results_50[["Relative sampled ages"]]) %>%
+  set_names(c("Age", "Survival", "Selectivity", "Relative Sampled Ages")) %>%
+  pivot_longer(-Age, names_to = "Type",values_to = "Values" )
+dome_sel_conditions$Type <- factor(dome_sel_conditions$Type,levels = c("Survival","Selectivity","Relative Sampled Ages"))
+
+dome_sel_cond_plot <- ggplot(dome_sel_conditions, aes(x = Age, y = Values, fill = Type, col = Type))+
+  ggtitle(" ")+
+  geom_area(size = 1, position = position_dodge(), alpha = .5)+
+  scale_fill_viridis_d(direction = -1)+
+  scale_colour_viridis_d(direction = -1)+
+  labs(y = "Proportion", x = "Age (years)")+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  theme_bw()+
+  theme(legend.position ="none")
+
+###n=50 
+Bayes_results_dome_50 <- Estimate_MCMC_Growth(data = dome_sel_LAA_50,
+                                              Model = "VB",
+                                              Linf = max_size,
+                                              Linf.se = max_size_se,
+                                              # L0 = birth_size,
+                                              L0 = 18,
+                                              sigma.max = 50,
+                                              # L0.se = birth_size_se,
+                                              L0.se = 1.8,
+                                              k.max = 0.8,
+                                              thin = 100,
+                                              BurnIn = 40000,
+                                              n_cores = 10,
+                                              iter = 100000,
+                                              control = list(adapt_delta = 0.99))
+
+nls_results_dome_50 <- Estimate_Growth(data = dome_sel_LAA_50, models = "VB",n.bootstraps = 100000, plots = F,Max.Age = max_age)
+
+Bayes_curve_dome_50 <- Calculate_MCMC_growth_curve(Bayes_results_dome_50,Model = "VB", max.age = max(nls_results_dome_50$Estimates$Age), probs = 0.95)
+
+
+dome_sel_50_plot <- ggplot() +
+  geom_point( data = dome_sel_LAA_50, aes(x = Age, y = Lt), alpha = 0.3)+
+  labs(y = "Length (cm)", x = "Age (years)")+
+  geom_ribbon(data = nls_results_dome_50$Estimates, aes(x = Age, ymin = low, ymax = upp, fill = "Frequentist"),alpha = .5 )+
+  geom_line(data = nls_results_dome_50$Estimates, aes(x = Age, y = AVG,col = "Frequentist"),alpha = .5, size = 1.2)+
+  geom_lineribbon(data = Bayes_curve_dome_50, aes(x = Age, y = LAA, ymin = .lower, ymax = .upper,fill = "Bayesian",col = "Bayesian"),
+                  alpha = .5)+
+  geom_line(data = real_curve, aes(x = Age, y = AVG),col = "blue", linetype = "dashed", size = 1.2)+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  scale_fill_viridis_d(end = 0.5, name = "Model")+
+  scale_colour_viridis_d(end = 0.5, guide = FALSE)+
+  theme(legend.position ="none")
+
+pander(Get_MCMC_parameters(Bayes_results_dome_50),caption = "MCMC - selectivity increases with age")
+
+save.image()
+##n=100
+Bayes_results_dome_100 <- Estimate_MCMC_Growth(data = dome_sel_LAA_100,
+                                               Model = "VB",
+                                               Linf = max_size,
+                                               Linf.se = max_size_se,
+                                               # L0 = birth_size,
+                                               L0 = 18,
+                                               sigma.max = 50,
+                                               # L0.se = birth_size_se,
+                                               L0.se = 1.8,
+                                               k.max = 0.8,
+                                               thin = 100,
+                                               BurnIn = 40000,
+                                               n_cores = 10,
+                                               iter = 100000,
+                                               control = list(adapt_delta = 0.99))
+
+nls_results_dome_100 <- Estimate_Growth(data = dome_sel_LAA_100, models = "VB",n.bootstraps = 100000, plots = F,Max.Age = max_age)
+
+Bayes_curve_dome_100 <- Calculate_MCMC_growth_curve(Bayes_results_dome_100,Model = "VB", max.age = max(nls_results_dome_100$Estimates$Age), probs = 0.95)
+save.image()
+
+dome_sel_100_plot <- ggplot() +
+  geom_point( data = dome_sel_LAA_100, aes(x = Age, y = Lt), alpha = 0.3)+
+  labs(y = "Length (cm)", x = "Age (years)")+
+  geom_ribbon(data = nls_results_dome_100$Estimates, aes(x = Age, ymin = low, ymax = upp, fill = "Frequentist"),alpha = .5 )+
+  geom_line(data = nls_results_dome_100$Estimates, aes(x = Age, y = AVG,col = "Frequentist"),alpha = .5, size = 1.2)+
+  geom_lineribbon(data = Bayes_curve_dome_100, aes(x = Age, y = LAA, ymin = .lower, ymax = .upper,fill = "Bayesian",col = "Bayesian"),
+                  alpha = .5)+
+  geom_line(data = real_curve, aes(x = Age, y = AVG),col = "blue", linetype = "dashed", size = 1.2)+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  scale_fill_viridis_d(end = 0.5, name = "Model")+
+  scale_colour_viridis_d(end = 0.5, guide = FALSE)+
+  theme(legend.position ="none")
+
+pander(Get_MCMC_parameters(Bayes_results_dome_100),caption = "MCMC - selectivity increases with age")
+
+##n150  
+Bayes_results_dome_150 <- Estimate_MCMC_Growth(data = dome_sel_LAA_150,
+                                               Model = "VB",
+                                               Linf = max_size,
+                                               Linf.se = max_size_se,
+                                               # L0 = birth_size,
+                                               L0 = 18,
+                                               sigma.max = 50,
+                                               # L0.se = birth_size_se,
+                                               L0.se = 1.8,
+                                               k.max = 0.8,
+                                               thin = 100,
+                                               BurnIn = 40000,
+                                               n_cores = 10,
+                                               iter = 100000,
+                                               control = list(adapt_delta = 0.99))
+save.image()
+
+nls_results_dome_150 <- Estimate_Growth(data = dome_sel_LAA_150, models = "VB",n.bootstraps = 100000, plots = F,Max.Age = max_age)
+
+Bayes_curve_dome_150 <- Calculate_MCMC_growth_curve(Bayes_results_dome_150,Model = "VB", max.age = max(nls_results_dome_150$Estimates$Age), probs = 0.95)
+
+
+dome_sel_150_plot <- ggplot() +
+  geom_point( data = dome_sel_LAA_150, aes(x = Age, y = Lt), alpha = 0.3)+
+  labs(y = "Length (cm)", x = "Age (years)")+
+  geom_ribbon(data = nls_results_dome_150$Estimates, aes(x = Age, ymin = low, ymax = upp, fill = "Frequentist"),alpha = .5 )+
+  geom_line(data = nls_results_dome_150$Estimates, aes(x = Age, y = AVG,col = "Frequentist"),alpha = .5, size = 1.2)+
+  geom_lineribbon(data = Bayes_curve_dome_150, aes(x = Age, y = LAA, ymin = .lower, ymax = .upper,fill = "Bayesian",col = "Bayesian"),
+                  alpha = .5)+
+  geom_line(data = real_curve, aes(x = Age, y = AVG),col = "blue", linetype = "dashed", size = 1.2)+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  scale_fill_viridis_d(end = 0.5, name = "Model")+
+  scale_colour_viridis_d(end = 0.5, guide = FALSE)+
+  theme(legend.position ="none")
+
+pander(Get_MCMC_parameters(Bayes_results_dome_150),caption = "MCMC - selectivity increases with age")
+
+dome_sel_plots <- plot_grid(dome_sel_cond_plot,dome_sel_50_plot, 
+                            dome_sel_100_plot, dome_sel_150_plot,
+                            align = "h", nrow = 1,
+                            labels = c("Dome shaped selectivity", "Sample size = 50", "Sample size = 100", "Sample size = 150"),label_size = 10,label_x = c(-.2,0,0,0))
+
+
+
+#### Missing older individuals ####
+
+young_sel_results_50 <- young_selectivity(M = .2, Age = 0:max_age, mean_sel = 4, slope_sel = 0.6,
+                                          n = 50, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+young_sel_LAA_50 <- young_sel_results_50[[1]] 
+
+plot(young_sel_LAA_50$Lt~young_sel_LAA_50$Age)
+
+young_sel_results_100 <- young_selectivity(M = .2, Age = 0:max_age, mean_sel = 4, slope_sel = 0.6,
+                                           n = 100, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+young_sel_LAA_100 <- young_sel_results_100[[1]]
+
+
+young_sel_results_150 <- young_selectivity(M = .2, Age = 0:max_age,  mean_sel = 4, slope_sel = 0.6,
+                                           n = 150, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+young_sel_LAA_150 <- young_sel_results_150[[1]]
+
+
+young_sel_conditions <-  data.frame(Age = 0:max_age,
+                                    survival = young_sel_results_50[["survival"]] ,
+                                    selectivity=  young_sel_results_50[["selectivity"]],
+                                    `Relative sampled ages` = young_sel_results_50[["Relative sampled ages"]]) %>%
+  set_names(c("Age", "Survival", "Selectivity", "Relative Sampled Ages")) %>%
+  pivot_longer(-Age, names_to = "Type",values_to = "Values" )
+
+young_sel_conditions$Type <- factor(young_sel_conditions$Type,levels = c("Survival","Selectivity","Relative Sampled Ages"))
+
+
+young_sel_cond_plot <- ggplot(young_sel_conditions, aes(x = Age, y = Values, fill = Type, col = Type))+
+  ggtitle(" ")+
+  geom_area(size = 1, position = position_dodge(), alpha = .5)+
+  scale_fill_viridis_d(direction = -1)+
+  scale_colour_viridis_d(direction = -1)+
+  labs(y = "Proportion", x = "Age (years)")+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  theme_bw()+
+  theme(legend.title = element_blank(),
+        legend.position = c(0.6,0.8),
+        legend.background = element_rect(colour = "black"))
+
+
+Bayes_results_young_50 <- Estimate_MCMC_Growth(data = young_sel_LAA_50,
+                                               Model = "VB",
+                                               Linf = max_size,
+                                               Linf.se = max_size_se,
+                                               # L0 = birth_size,
+                                               L0 = 18,
+                                               sigma.max = 50,
+                                               # L0.se = birth_size_se,
+                                               L0.se = 1.8,
+                                               k.max = 0.8,
+                                               thin = 100,
+                                               BurnIn = 40000,
+                                               n_cores = 10,
+                                               iter = 100000,
+                                               control = list(adapt_delta = 0.99))
+
+nls_results_young_50 <- Estimate_Growth(data = young_sel_LAA_50, models = "VB",n.bootstraps = 100000, plots = F,Max.Age = max_age)
+
+Bayes_curve_young_50 <- Calculate_MCMC_growth_curve(Bayes_results_young_50,Model = "VB", max.age = max(nls_results_young_50$Estimates$Age), probs = 0.95)
+
+
+young_sel_50_plot <- ggplot() +
+  geom_point( data = young_sel_LAA_50, aes(x = Age, y = Lt), alpha = 0.3)+
+  labs(y = "Length (cm)", x = "Age (years)")+
+  geom_ribbon(data = nls_results_young_50$Estimates, aes(x = Age, ymin = low, ymax = upp, fill = "Frequentist"),alpha = .5 )+
+  geom_line(data = nls_results_young_50$Estimates, aes(x = Age, y = AVG,col = "Frequentist"),alpha = .5, size = 1.2)+
+  geom_lineribbon(data = Bayes_curve_young_50, aes(x = Age, y = LAA, ymin = .lower, ymax = .upper,fill = "Bayesian",col = "Bayesian"),
+                  alpha = .5)+
+  geom_line(data = real_curve, aes(x = Age, y = AVG),col = "blue", linetype = "dashed", size = 1.2)+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  scale_fill_viridis_d(end = 0.5, name = "Model")+
+  scale_colour_viridis_d(end = 0.5, guide = FALSE)+
+  theme(legend.position = c(0.25,0.8),
+        legend.background = element_rect(colour = "black"))
+
+pander(Get_MCMC_parameters(Bayes_results_young_50),caption = "MCMC - selectivity increases with age")
+
+Bayes_results_young_100 <- Estimate_MCMC_Growth(data = young_sel_LAA_100,
+                                                Model = "VB",
+                                                Linf = max_size,
+                                                Linf.se = max_size_se,
+                                                # L0 = birth_size,
+                                                L0 = 18,
+                                                sigma.max = 50,
+                                                # L0.se = birth_size_se,
+                                                L0.se = 1.8,
+                                                k.max = 0.8,
+                                                thin = 100,
+                                                BurnIn = 40000,
+                                                n_cores = 10,
+                                                iter = 100000,
+                                                control = list(adapt_delta = 0.99))
+
+
+nls_results_young_100 <- Estimate_Growth(data = young_sel_LAA_100, models = "VB",n.bootstraps = 100000, plots = F,Max.Age = max_age)
+
+Bayes_curve_young_100 <- Calculate_MCMC_growth_curve(Bayes_results_young_100,Model = "VB", max.age = max(nls_results_young_100$Estimates$Age), probs = 0.95)
+
+
+young_sel_100_plot <- ggplot() +
+  geom_point( data = young_sel_LAA_100, aes(x = Age, y = Lt), alpha = 0.3)+
+  labs(y = "Length (cm)", x = "Age (years)")+
+  geom_ribbon(data = nls_results_young_100$Estimates, aes(x = Age, ymin = low, ymax = upp, fill = "Frequentist"),alpha = .5 )+
+  geom_line(data = nls_results_young_100$Estimates, aes(x = Age, y = AVG,col = "Frequentist"),alpha = .5, size = 1.2)+
+  geom_lineribbon(data = Bayes_curve_young_100, aes(x = Age, y = LAA, ymin = .lower, ymax = .upper,fill = "Bayesian",col = "Bayesian"),
+                  alpha = .5)+
+  geom_line(data = real_curve, aes(x = Age, y = AVG),col = "blue", linetype = "dashed", size = 1.2)+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  scale_fill_viridis_d(end = 0.5, name = "Model")+
+  scale_colour_viridis_d(end = 0.5, guide = FALSE)+
+  theme(legend.position ="none")
+
+pander(Get_MCMC_parameters(Bayes_results_young_100),caption = "MCMC - selectivity increases with age")
+
+Bayes_results_young_150 <- Estimate_MCMC_Growth(data = young_sel_LAA_150,
+                                                Model = "VB",
+                                                Linf = max_size,
+                                                Linf.se = max_size_se,
+                                                # L0 = birth_size,
+                                                L0 = 18,
+                                                sigma.max = 50,
+                                                # L0.se = birth_size_se,
+                                                L0.se = 1.8,
+                                                k.max = 0.8,
+                                                thin = 100,
+                                                BurnIn = 40000,
+                                                n_cores = 10,
+                                                iter = 100000,
+                                                control = list(adapt_delta = 0.99))
+nls_results_young_150 <- Estimate_Growth(data = young_sel_LAA_150, models = "VB",n.bootstraps = 100000, plots = F,Max.Age = max_age)
+
+Bayes_curve_young_150 <- Calculate_MCMC_growth_curve(Bayes_results_young_150,Model = "VB", max.age = max(nls_results_young_150$Estimates$Age), probs = 0.95)
+
+
+young_sel_150_plot <- ggplot() +
+  geom_point( data = young_sel_LAA_150, aes(x = Age, y = Lt), alpha = 0.3)+
+  labs(y = "Length (cm)", x = "Age (years)")+
+  geom_ribbon(data = nls_results_young_150$Estimates, aes(x = Age, ymin = low, ymax = upp, fill = "Frequentist"),alpha = .5 )+
+  geom_line(data = nls_results_young_150$Estimates, aes(x = Age, y = AVG,col = "Frequentist"),alpha = .5, size = 1.2)+
+  geom_lineribbon(data = Bayes_curve_young_150, aes(x = Age, y = LAA, ymin = .lower, ymax = .upper,fill = "Bayesian",col = "Bayesian"),
+                  alpha = .5)+
+  geom_line(data = real_curve, aes(x = Age, y = AVG),col = "blue", linetype = "dashed", size = 1.2)+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  scale_fill_viridis_d(end = 0.5, name = "Model")+
+  scale_colour_viridis_d(end = 0.5, guide = FALSE)+
+  theme(legend.position ="topright")
+
+pander(Get_MCMC_parameters(Bayes_results_young_150),caption = "MCMC - selectivity increases with age")
+
+pander(rownames_to_column(as.data.frame(nls_results_young_150$VonB), " "),caption = "nls - selectivity increases with age")
+
+young_sel_plots <- plot_grid(young_sel_cond_plot,young_sel_50_plot, young_sel_100_plot,
+                             young_sel_150_plot, align = "h", nrow = 1,
+                             labels = c("Selectivity decreases with age", "Sample size = 50", "Sample size = 100", "Sample size = 150"),label_size = 10,label_x = c(-.2,0,0,0))
+
+Main_figure <- plot_grid(dome_sel_plots, young_sel_plots, Old_sel_plots, nrow = 3)
+
+Main_figure
+
+
+###### Bimodal selectivity #########
+
+### (normalise markets for lfq data)
+bimodal_selectivity <- function(Age, 
+                             mean_sel1 = 1.5, 
+                             sd_sel1 = 0.5, 
+                             mean_sel2 = 5.5, 
+                             sd_sel2 = 2, 
+                             M =.2, 
+                             n = 100,
+                             Linf, 
+                             k, 
+                             L0, 
+                             sigma=Linf/100) {
+  addTaskCallback(function(...) {set.seed(123);TRUE})
+  
+  bimodal <- function(x) {
+    (dnorm(x, mean=mean_sel1, sd=sd_sel1) / 3) + (3 * dnorm(x, mean=mean_sel2, sd=sd_sel2))      
+  }
+  
+  selectivity <- bimodal(Age) / max(bimodal(Age))  #hist(selectivity)
+  
+  survival <- rep(NA, length(Age)) 
+  survival[1] <- 1
+  for (i in 2:(max(Age)+1)) {
+    survival[i] <- survival[i - 1] * exp(-M)
+  } 
+  
+  sims <- as.vector(rmultinom(1, prob = survival * selectivity, size = 10000))
+  
+  age_structure <- sims/max(sims)
+  
+  Observed_lengths <-  Linf-(Linf-L0)*(exp(-k*Age))
+  
+  
+  Sampled_lengths <- as.data.frame(cbind(Observed_lengths, sims))  
+  Selected_lengths <- rep(Sampled_lengths[, 1], Sampled_lengths[, 2])  
+  Age_col <- rep(Age, Sampled_lengths[, 2]) 
+  
+  
+  len_col <- sapply(Selected_lengths, function(x) rtruncnorm(1,a=-0.0001, mean = x, sd = x^sigma))
+  
+  
+  Results <- as.data.frame(cbind(Age_col, len_col))  
+  colnames(Results) <- c("Age", "Lt")  
+  Results <-Results[sample(nrow(Results), size = n, replace = T), ] 
+  
+  return(list(LAA = Results, survival=survival, selectivity=selectivity, `Relative sampled ages` = age_structure))
+}
+
+
+
+bimodal_sel_results_50 <- bimodal_selectivity(M = .2, Age = 0:max_age,
+                                        n = 50, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+bimodal_sel_LAA_50 <- bimodal_sel_results_50[[1]]
+
+
+bimodal_sel_results_100 <- bimodal_selectivity(M = .2, Age = 0:max_age,
+                                         n = 100, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+bimodal_sel_LAA_100 <- bimodal_sel_results_100[[1]]
+
+
+bimodal_sel_results_150 <- bimodal_selectivity(M = .2, Age = 0:max_age, 
+                                         n = 150, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+bimodal_sel_LAA_150 <- bimodal_sel_results_150[[1]]
+
+
+
+bimodal_sel_conditions <-  data.frame(Age = 0:max_age,
+                                   survival = bimodal_sel_results_50[["survival"]] ,
+                                   selectivity=  bimodal_sel_results_50[["selectivity"]],
+                                   `Relative sampled ages` = bimodal_sel_results_50[["Relative sampled ages"]]) %>%
+  set_names(c("Age", "Survival", "Selectivity", "Relative Sampled Ages")) %>%
+  pivot_longer(-Age, names_to = "Type",values_to = "Values" )
+bimodal_sel_conditions$Type <- factor(bimodal_sel_conditions$Type,levels = c("Survival","Selectivity","Relative Sampled Ages"))
+
+bimodal_sel_cond_plot <- ggplot(bimodal_sel_conditions, aes(x = Age, y = Values, fill = Type, col = Type))+
+  ggtitle(" ")+
+  geom_area(size = 1, position = position_dodge(), alpha = .5)+
+  scale_fill_viridis_d(direction = -1)+
+  scale_colour_viridis_d(direction = -1)+
+  labs(y = "Proportion", x = "Age (years)")+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  theme_bw()+
+  theme(legend.position ="none")
+
+###n=50 
+Bayes_results_bimodal_50 <- Estimate_MCMC_Growth(data = bimodal_sel_LAA_50,
+                                                 Model = "VB",
+                                                 Linf = max_size,
+                                                 Linf.se = max_size_se,
+                                                 # L0 = birth_size,
+                                                 L0 = 18,
+                                                 sigma.max = 50,
+                                                 # L0.se = birth_size_se,
+                                                 L0.se = 1.8,
+                                                 k.max = 0.8,
+                                                 thin = 100,
+                                                 BurnIn = 40000,
+                                                 n_cores = 10, 
+                                                 iter = 100000,
+                                                 control = list(adapt_delta = 0.99))
+
+nls_results_bimodal_50 <- Estimate_Growth(data = bimodal_sel_LAA_50, models = "VB",n.bootstraps = 100000, plots = F,Max.Age = max_age)
+
+Bayes_curve_bimodal_50 <- Calculate_MCMC_growth_curve(Bayes_results_bimodal_50,Model = "VB", max.age = max(nls_results_bimodal_50$Estimates$Age), probs = 0.95)
+
+
+bimodal_sel_50_plot <- ggplot() +
+  geom_point( data = bimodal_sel_LAA_50, aes(x = Age, y = Lt), alpha = 0.3)+
+  labs(y = "Length (cm)", x = "Age (years)")+
+  geom_ribbon(data = nls_results_bimodal_50$Estimates, aes(x = Age, ymin = low, ymax = upp, fill = "Frequentist"),alpha = .5 )+
+  geom_line(data = nls_results_bimodal_50$Estimates, aes(x = Age, y = AVG,col = "Frequentist"),alpha = .5, size = 1.2)+
+  geom_lineribbon(data = Bayes_curve_bimodal_50, aes(x = Age, y = LAA, ymin = .lower, ymax = .upper,fill = "Bayesian",col = "Bayesian"),
+                  alpha = .5)+
+  geom_line(data = real_curve, aes(x = Age, y = AVG),col = "blue", linetype = "dashed", size = 1.2)+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  scale_fill_viridis_d(end = 0.5, name = "Model")+
+  scale_colour_viridis_d(end = 0.5, guide = FALSE)+
+  theme(legend.position ="none")
+
+pander(Get_MCMC_parameters(Bayes_results_bimodal_50),caption = "MCMC - selectivity increases with age")
+
+save.image()
+##n=100
+Bayes_results_bimodal_100 <- Estimate_MCMC_Growth(data = bimodal_sel_LAA_100,
+                                                  Model = "VB",
+                                                  Linf = max_size,
+                                                  Linf.se = max_size_se,
+                                                  # L0 = birth_size,
+                                                  L0 = 18,
+                                                  sigma.max = 50,
+                                                  # L0.se = birth_size_se,
+                                                  L0.se = 1.8,
+                                                  k.max = 0.8,
+                                                  thin = 100,
+                                                  BurnIn = 40000,
+                                                  n_cores = 10,
+                                                  iter = 100000,
+                                                  control = list(adapt_delta = 0.99))
+
+nls_results_bimodal_100 <- Estimate_Growth(data = bimodal_sel_LAA_100, models = "VB",n.bootstraps = 100000, plots = F,Max.Age = max_age)
+
+Bayes_curve_bimodal_100 <- Calculate_MCMC_growth_curve(Bayes_results_bimodal_100,Model = "VB", max.age = max(nls_results_bimodal_100$Estimates$Age), probs = 0.95)
+save.image()
+
+bimodal_sel_100_plot <- ggplot() +
+  geom_point( data = bimodal_sel_LAA_100, aes(x = Age, y = Lt), alpha = 0.3)+
+  labs(y = "Length (cm)", x = "Age (years)")+
+  geom_ribbon(data = nls_results_bimodal_100$Estimates, aes(x = Age, ymin = low, ymax = upp, fill = "Frequentist"),alpha = .5 )+
+  geom_line(data = nls_results_bimodal_100$Estimates, aes(x = Age, y = AVG,col = "Frequentist"),alpha = .5, size = 1.2)+
+  geom_lineribbon(data = Bayes_curve_bimodal_100, aes(x = Age, y = LAA, ymin = .lower, ymax = .upper,fill = "Bayesian",col = "Bayesian"),
+                  alpha = .5)+
+  geom_line(data = real_curve, aes(x = Age, y = AVG),col = "blue", linetype = "dashed", size = 1.2)+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  scale_fill_viridis_d(end = 0.5, name = "Model")+
+  scale_colour_viridis_d(end = 0.5, guide = FALSE)+
+  theme(legend.position ="none")
+
+pander(Get_MCMC_parameters(Bayes_results_bimodal_100),caption = "MCMC - selectivity increases with age")
+
+##n150  
+Bayes_results_bimodal_150 <- Estimate_MCMC_Growth(data = bimodal_sel_LAA_150,
+                                                  Model = "VB",
+                                                  Linf = max_size,
+                                                  Linf.se = max_size_se,
+                                                  # L0 = birth_size,
+                                                  L0 = 18,
+                                                  sigma.max = 50,
+                                                  # L0.se = birth_size_se,
+                                                  L0.se = 1.8,
+                                                  k.max = 0.8,
+                                                  thin = 100,
+                                                  BurnIn = 40000,
+                                                  n_cores = 10,
+                                                  iter = 100000,
+                                                  control = list(adapt_delta = 0.99))
+save.image()
+
+nls_results_bimodal_150 <- Estimate_Growth(data = bimodal_sel_LAA_150, models = "VB",n.bootstraps = 100000, plots = F,Max.Age = max_age)
+
+Bayes_curve_bimodal_150 <- Calculate_MCMC_growth_curve(Bayes_results_bimodal_150,Model = "VB", max.age = max(nls_results_bimodal_150$Estimates$Age), probs = 0.95)
+
+
+bimodal_sel_150_plot <- ggplot() +
+  geom_point( data = bimodal_sel_LAA_150, aes(x = Age, y = Lt), alpha = 0.3)+
+  labs(y = "Length (cm)", x = "Age (years)")+
+  geom_ribbon(data = nls_results_bimodal_150$Estimates, aes(x = Age, ymin = low, ymax = upp, fill = "Frequentist"),alpha = .5 )+
+  geom_line(data = nls_results_bimodal_150$Estimates, aes(x = Age, y = AVG,col = "Frequentist"),alpha = .5, size = 1.2)+
+  geom_lineribbon(data = Bayes_curve_bimodal_150, aes(x = Age, y = LAA, ymin = .lower, ymax = .upper,fill = "Bayesian",col = "Bayesian"),
+                  alpha = .5)+
+  geom_line(data = real_curve, aes(x = Age, y = AVG),col = "blue", linetype = "dashed", size = 1.2)+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  scale_fill_viridis_d(end = 0.5, name = "Model")+
+  scale_colour_viridis_d(end = 0.5, guide = FALSE)+
+  theme(legend.position ="none")
+
+pander(Get_MCMC_parameters(Bayes_results_bimodal_150),caption = "MCMC - selectivity increases with age")
+
+bimodal_sel_plots <- plot_grid(bimodal_sel_cond_plot,bimodal_sel_50_plot, 
+                            bimodal_sel_100_plot, bimodal_sel_150_plot,
+                            align = "h", nrow = 1,
+                            labels = c("bimodal shaped selectivity", "Sample size = 50", "Sample size = 100", "Sample size = 150"),label_size = 10,label_x = c(-.2,0,0,0))
+
+
+##########
+#### Log selectivity ######
+#######
+
+
+
+log_selectivity <- function(Age, 
+                                mean_sel = 5, 
+                                sd_sel = 2, 
+                                M =.2, 
+                                n = 100,
+                                Linf, 
+                                k, 
+                                L0, 
+                                sigma=Linf/100) {
+  addTaskCallback(function(...) {set.seed(123);TRUE})
+  
+  
+  selectivity <- dlogis(Age, location = mean_sel, scale = sd_sel)/max(dlogis(Age, location = mean_sel, scale = sd_sel))  
+  
+  survival <- rep(NA, length(Age)) 
+  survival[1] <- 1
+  for (i in 2:(max(Age)+1)) {
+    survival[i] <- survival[i - 1] * exp(-M)
+  } 
+  
+  sims <- as.vector(rmultinom(1, prob = survival * selectivity, size = 10000))
+  
+  age_structure <- sims/max(sims)
+  
+  Observed_lengths <-  Linf-(Linf-L0)*(exp(-k*Age))
+  
+  
+  Sampled_lengths <- as.data.frame(cbind(Observed_lengths, sims))  
+  Selected_lengths <- rep(Sampled_lengths[, 1], Sampled_lengths[, 2])  
+  Age_col <- rep(Age, Sampled_lengths[, 2]) 
+  
+  
+  len_col <- sapply(Selected_lengths, function(x) rtruncnorm(1,a=-0.0001, mean = x, sd = x^sigma))
+  
+  
+  Results <- as.data.frame(cbind(Age_col, len_col))  
+  colnames(Results) <- c("Age", "Lt")  
+  Results <-Results[sample(nrow(Results), size = n, replace = T), ] 
+  
+  return(list(LAA = Results, survival=survival, selectivity=selectivity, `Relative sampled ages` = age_structure))
+}
+
+
+
+log_sel_results_50 <- log_selectivity(M = .2, Age = 0:max_age,
+                                              n = 50, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+log_sel_LAA_50 <- log_sel_results_50[[1]]
+
+
+log_sel_results_100 <- log_selectivity(M = .2, Age = 0:max_age,
+                                               n = 100, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+log_sel_LAA_100 <- log_sel_results_100[[1]]
+
+
+log_sel_results_150 <- log_selectivity(M = .2, Age = 0:max_age, 
+                                               n = 150, Linf = Linf_obs, k = k_obs , L0 = L0_obs, sigma = sigma_obs)
+
+log_sel_LAA_150 <- log_sel_results_150[[1]]
+
+
+
+log_sel_conditions <-  data.frame(Age = 0:max_age,
+                                      survival = log_sel_results_50[["survival"]] ,
+                                      selectivity=  log_sel_results_50[["selectivity"]],
+                                      `Relative sampled ages` = log_sel_results_50[["Relative sampled ages"]]) %>%
+  set_names(c("Age", "Survival", "Selectivity", "Relative Sampled Ages")) %>%
+  pivot_longer(-Age, names_to = "Type",values_to = "Values" )
+log_sel_conditions$Type <- factor(log_sel_conditions$Type,levels = c("Survival","Selectivity","Relative Sampled Ages"))
+
+log_sel_cond_plot <- ggplot(log_sel_conditions, aes(x = Age, y = Values, fill = Type, col = Type))+
+  ggtitle(" ")+
+  geom_area(size = 1, position = position_dodge(), alpha = .5)+
+  scale_fill_viridis_d(direction = -1)+
+  scale_colour_viridis_d(direction = -1)+
+  labs(y = "Proportion", x = "Age (years)")+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  theme_bw()+
+  theme(legend.position ="none")
+
+###n=50 
+Bayes_results_log_50 <- Estimate_MCMC_Growth(data = log_sel_LAA_50,
+                                                 Model = "VB",
+                                                 Linf = max_size,
+                                                 Linf.se = max_size_se,
+                                                 # L0 = birth_size,
+                                                 L0 = 18,
+                                                 sigma.max = 50,
+                                                 # L0.se = birth_size_se,
+                                                 L0.se = 1.8,
+                                                 k.max = 0.8,
+                                                 thin = 100,
+                                                 BurnIn = 40000,
+                                                 n_cores = 10, 
+                                                 iter = 100000,
+                                                 control = list(adapt_delta = 0.99))
+
+nls_results_log_50 <- Estimate_Growth(data = log_sel_LAA_50, models = "VB",n.bootstraps = 100000, plots = F,Max.Age = max_age)
+
+Bayes_curve_log_50 <- Calculate_MCMC_growth_curve(Bayes_results_log_50,Model = "VB", max.age = max(nls_results_log_50$Estimates$Age), probs = 0.95)
+
+
+log_sel_50_plot <- ggplot() +
+  geom_point( data = log_sel_LAA_50, aes(x = Age, y = Lt), alpha = 0.3)+
+  labs(y = "Length (cm)", x = "Age (years)")+
+  geom_ribbon(data = nls_results_log_50$Estimates, aes(x = Age, ymin = low, ymax = upp, fill = "Frequentist"),alpha = .5 )+
+  geom_line(data = nls_results_log_50$Estimates, aes(x = Age, y = AVG,col = "Frequentist"),alpha = .5, size = 1.2)+
+  geom_lineribbon(data = Bayes_curve_log_50, aes(x = Age, y = LAA, ymin = .lower, ymax = .upper,fill = "Bayesian",col = "Bayesian"),
+                  alpha = .5)+
+  geom_line(data = real_curve, aes(x = Age, y = AVG),col = "blue", linetype = "dashed", size = 1.2)+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  scale_fill_viridis_d(end = 0.5, name = "Model")+
+  scale_colour_viridis_d(end = 0.5, guide = FALSE)+
+  theme(legend.position ="none")
+
+pander(Get_MCMC_parameters(Bayes_results_log_50),caption = "MCMC - selectivity increases with age")
+
+save.image()
+##n=100
+Bayes_results_log_100 <- Estimate_MCMC_Growth(data = log_sel_LAA_100,
+                                                  Model = "VB",
+                                                  Linf = max_size,
+                                                  Linf.se = max_size_se,
+                                                  # L0 = birth_size,
+                                                  L0 = 18,
+                                                  sigma.max = 50,
+                                                  # L0.se = birth_size_se,
+                                                  L0.se = 1.8,
+                                                  k.max = 0.8,
+                                                  thin = 100,
+                                                  BurnIn = 40000,
+                                                  n_cores = 10,
+                                                  iter = 100000,
+                                                  control = list(adapt_delta = 0.99))
+
+nls_results_log_100 <- Estimate_Growth(data = log_sel_LAA_100, models = "VB",n.bootstraps = 100000, plots = F,Max.Age = max_age)
+
+Bayes_curve_log_100 <- Calculate_MCMC_growth_curve(Bayes_results_log_100,Model = "VB", max.age = max(nls_results_log_100$Estimates$Age), probs = 0.95)
+save.image()
+
+log_sel_100_plot <- ggplot() +
+  geom_point( data = log_sel_LAA_100, aes(x = Age, y = Lt), alpha = 0.3)+
+  labs(y = "Length (cm)", x = "Age (years)")+
+  geom_ribbon(data = nls_results_log_100$Estimates, aes(x = Age, ymin = low, ymax = upp, fill = "Frequentist"),alpha = .5 )+
+  geom_line(data = nls_results_log_100$Estimates, aes(x = Age, y = AVG,col = "Frequentist"),alpha = .5, size = 1.2)+
+  geom_lineribbon(data = Bayes_curve_log_100, aes(x = Age, y = LAA, ymin = .lower, ymax = .upper,fill = "Bayesian",col = "Bayesian"),
+                  alpha = .5)+
+  geom_line(data = real_curve, aes(x = Age, y = AVG),col = "blue", linetype = "dashed", size = 1.2)+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  scale_fill_viridis_d(end = 0.5, name = "Model")+
+  scale_colour_viridis_d(end = 0.5, guide = FALSE)+
+  theme(legend.position ="none")
+
+pander(Get_MCMC_parameters(Bayes_results_log_100),caption = "MCMC - selectivity increases with age")
+
+##n150  
+Bayes_results_log_150 <- Estimate_MCMC_Growth(data = log_sel_LAA_150,
+                                                  Model = "VB",
+                                                  Linf = max_size,
+                                                  Linf.se = max_size_se,
+                                                  # L0 = birth_size,
+                                                  L0 = 18,
+                                                  sigma.max = 50,
+                                                  # L0.se = birth_size_se,
+                                                  L0.se = 1.8,
+                                                  k.max = 0.8,
+                                                  thin = 100,
+                                                  BurnIn = 40000,
+                                                  n_cores = 10,
+                                                  iter = 100000,
+                                                  control = list(adapt_delta = 0.99))
+save.image()
+
+nls_results_log_150 <- Estimate_Growth(data = log_sel_LAA_150, models = "VB",n.bootstraps = 100000, plots = F,Max.Age = max_age)
+
+Bayes_curve_log_150 <- Calculate_MCMC_growth_curve(Bayes_results_log_150,Model = "VB", max.age = max(nls_results_log_150$Estimates$Age), probs = 0.95)
+
+
+log_sel_150_plot <- ggplot() +
+  geom_point( data = log_sel_LAA_150, aes(x = Age, y = Lt), alpha = 0.3)+
+  labs(y = "Length (cm)", x = "Age (years)")+
+  geom_ribbon(data = nls_results_log_150$Estimates, aes(x = Age, ymin = low, ymax = upp, fill = "Frequentist"),alpha = .5 )+
+  geom_line(data = nls_results_log_150$Estimates, aes(x = Age, y = AVG,col = "Frequentist"),alpha = .5, size = 1.2)+
+  geom_lineribbon(data = Bayes_curve_log_150, aes(x = Age, y = LAA, ymin = .lower, ymax = .upper,fill = "Bayesian",col = "Bayesian"),
+                  alpha = .5)+
+  geom_line(data = real_curve, aes(x = Age, y = AVG),col = "blue", linetype = "dashed", size = 1.2)+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_continuous(expand = c(0,0))+
+  scale_fill_viridis_d(end = 0.5, name = "Model")+
+  scale_colour_viridis_d(end = 0.5, guide = FALSE)+
+  theme(legend.position ="none")
+
+pander(Get_MCMC_parameters(Bayes_results_log_150),caption = "MCMC - selectivity increases with age")
+
+log_sel_plots <- plot_grid(log_sel_cond_plot,log_sel_50_plot, 
+                               log_sel_100_plot, log_sel_150_plot,
+                               align = "h", nrow = 1,
+                               labels = c("log shaped selectivity", "Sample size = 50", "Sample size = 100", "Sample size = 150"),label_size = 10,label_x = c(-.2,0,0,0))
+
